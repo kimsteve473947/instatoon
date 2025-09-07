@@ -23,28 +23,27 @@ export default function Home() {
             </div>
             
             <h1 className="text-5xl sm:text-6xl lg:text-7xl font-bold tracking-tight mb-6">
-              인스타그램 웹툰을
+              세상의 모든 디자인은
               <br />
               <span className="bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
-                AI로 5분만에 제작
+                인스타툰으로 완성
               </span>
             </h1>
             
             <p className="text-xl text-muted-foreground mb-8 max-w-2xl mx-auto leading-relaxed">
-              <strong>캐릭터 일관성 99% 유지</strong>하면서 프로 수준의 웹툰을 제작하세요.
-              한국 웹툰 시장에 최적화된 AI 툴로 창작의 자유를 경험하세요.
+              <strong>웹툰부터 인스타그램 콘텐츠까지</strong> 템플릿으로 쉽고 간편하게 시작해보세요!
             </p>
             
             <div className="flex flex-col sm:flex-row gap-4 justify-center mb-8">
-              <Button size="lg" asChild className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-lg px-8">
-                <Link href="/sign-in">
-                  무료로 시작하기
+              <Button size="lg" asChild className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-lg px-8 rounded-full">
+                <Link href="/studio">
+                  바로 시작하기
                   <ArrowRight className="ml-2 h-5 w-5" />
                 </Link>
               </Button>
-              <Button size="lg" variant="outline" asChild className="text-lg px-8">
-                <Link href="/studio">
-                  체험해보기
+              <Button size="lg" variant="outline" asChild className="text-lg px-8 rounded-full border-2 hover:bg-muted/50">
+                <Link href="/gallery">
+                  갤러리 보기
                   <ChevronRight className="ml-2 h-5 w-5" />
                 </Link>
               </Button>
@@ -68,38 +67,117 @@ export default function Home() {
         </div>
       </section>
 
+      {/* 템플릿 쇼케이스 섹션 */}
+      <section className="py-20 bg-muted/30">
+        <div className="container mx-auto px-4">
+          <div className="text-center mb-16">
+            <h2 className="text-3xl font-bold mb-4">
+              다양한 템플릿으로 쉽게 시작하세요
+            </h2>
+            <p className="text-muted-foreground text-lg">
+              전문 디자이너가 제작한 웹툰 템플릿을 자유롭게 커스터마이징하세요
+            </p>
+          </div>
+          
+          {/* 템플릿 미리보기 그리드 */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 max-w-6xl mx-auto mb-12">
+            {/* 템플릿 카드들 */}
+            <div className="relative group cursor-pointer">
+              <div className="aspect-[3/4] bg-gradient-to-br from-pink-100 to-purple-100 rounded-lg overflow-hidden">
+                <div className="p-4 h-full flex flex-col justify-between">
+                  <div className="text-xs text-purple-600 font-semibold">로맨스 웹툰</div>
+                  <div className="space-y-2">
+                    <div className="h-2 bg-purple-300 rounded-full w-3/4"></div>
+                    <div className="h-2 bg-purple-200 rounded-full w-1/2"></div>
+                  </div>
+                </div>
+              </div>
+              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-all rounded-lg" />
+            </div>
+            
+            <div className="relative group cursor-pointer">
+              <div className="aspect-[3/4] bg-gradient-to-br from-blue-100 to-cyan-100 rounded-lg overflow-hidden">
+                <div className="p-4 h-full flex flex-col justify-between">
+                  <div className="text-xs text-blue-600 font-semibold">액션 웹툰</div>
+                  <div className="space-y-2">
+                    <div className="h-2 bg-blue-300 rounded-full w-2/3"></div>
+                    <div className="h-2 bg-blue-200 rounded-full w-3/4"></div>
+                  </div>
+                </div>
+              </div>
+              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-all rounded-lg" />
+            </div>
+            
+            <div className="relative group cursor-pointer">
+              <div className="aspect-[3/4] bg-gradient-to-br from-green-100 to-emerald-100 rounded-lg overflow-hidden">
+                <div className="p-4 h-full flex flex-col justify-between">
+                  <div className="text-xs text-green-600 font-semibold">일상 웹툰</div>
+                  <div className="space-y-2">
+                    <div className="h-2 bg-green-300 rounded-full w-1/2"></div>
+                    <div className="h-2 bg-green-200 rounded-full w-2/3"></div>
+                  </div>
+                </div>
+              </div>
+              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-all rounded-lg" />
+            </div>
+            
+            <div className="relative group cursor-pointer">
+              <div className="aspect-[3/4] bg-gradient-to-br from-orange-100 to-yellow-100 rounded-lg overflow-hidden">
+                <div className="p-4 h-full flex flex-col justify-between">
+                  <div className="text-xs text-orange-600 font-semibold">코미디 웹툰</div>
+                  <div className="space-y-2">
+                    <div className="h-2 bg-orange-300 rounded-full w-3/4"></div>
+                    <div className="h-2 bg-orange-200 rounded-full w-1/2"></div>
+                  </div>
+                </div>
+              </div>
+              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-all rounded-lg" />
+            </div>
+          </div>
+          
+          <div className="text-center">
+            <Button size="lg" variant="outline" asChild className="text-lg px-8 rounded-full border-2 hover:bg-muted/50">
+              <Link href="/gallery">
+                더 많은 템플릿 보기
+                <ArrowRight className="ml-2 h-5 w-5" />
+              </Link>
+            </Button>
+          </div>
+        </div>
+      </section>
+
       {/* 특징 섹션 */}
-      <section className="py-20 bg-muted/50">
+      <section className="py-20">
         <div className="container mx-auto px-4">
           <h2 className="text-3xl font-bold text-center mb-12">
-            왜 인스타툰인가요?
+            왜 인스타툰을 선택해야 할까요?
           </h2>
           <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">
             <div className="flex flex-col items-center text-center">
               <div className="rounded-full bg-primary/10 p-3 mb-4">
                 <Sparkles className="h-6 w-6 text-primary" />
               </div>
-              <h3 className="text-lg font-semibold mb-2">캐릭터 일관성</h3>
+              <h3 className="text-lg font-semibold mb-2">AI 캐릭터 일관성</h3>
               <p className="text-muted-foreground">
-                한 번 생성한 캐릭터를 계속 사용할 수 있어 일관된 스토리텔링이 가능합니다
+                한 번 등록한 캐릭터로 여러 편의 웹툰을 제작할 수 있어 스토리 연결성을 유지합니다
               </p>
             </div>
             <div className="flex flex-col items-center text-center">
               <div className="rounded-full bg-primary/10 p-3 mb-4">
                 <Zap className="h-6 w-6 text-primary" />
               </div>
-              <h3 className="text-lg font-semibold mb-2">빠른 제작</h3>
+              <h3 className="text-lg font-semibold mb-2">5분만에 완성</h3>
               <p className="text-muted-foreground">
-                AI가 즉시 이미지를 생성하므로 몇 분 만에 웹툰을 완성할 수 있습니다
+                템플릿을 선택하고 텍스트만 입력하면 전문가급 웹툰이 자동으로 생성됩니다
               </p>
             </div>
             <div className="flex flex-col items-center text-center">
               <div className="rounded-full bg-primary/10 p-3 mb-4">
                 <Shield className="h-6 w-6 text-primary" />
               </div>
-              <h3 className="text-lg font-semibold mb-2">합리적인 가격</h3>
+              <h3 className="text-lg font-semibold mb-2">무료로 시작</h3>
               <p className="text-muted-foreground">
-                토큰 기반 시스템으로 사용한 만큼만 비용을 지불합니다
+                회원가입만 하면 10개의 무료 토큰으로 바로 웹툰 제작을 시작할 수 있습니다
               </p>
             </div>
           </div>
@@ -138,8 +216,8 @@ export default function Home() {
                     <span className="text-sm">프로젝트 3개</span>
                   </li>
                 </ul>
-                <Button className="w-full mt-6" variant="outline" asChild>
-                  <Link href="/sign-in">무료 시작</Link>
+                <Button className="w-full mt-6 rounded-full" variant="outline" asChild>
+                  <Link href="/studio">무료 시작</Link>
                 </Button>
               </CardContent>
             </Card>
@@ -168,7 +246,7 @@ export default function Home() {
                     <span className="text-sm">무제한 프로젝트</span>
                   </li>
                 </ul>
-                <Button className="w-full mt-6 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700" asChild>
+                <Button className="w-full mt-6 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 rounded-full" asChild>
                   <Link href="/sign-in">선택하기</Link>
                 </Button>
               </CardContent>
@@ -195,7 +273,7 @@ export default function Home() {
                     <span className="text-sm">우선 지원</span>
                   </li>
                 </ul>
-                <Button className="w-full mt-6" variant="outline" asChild>
+                <Button className="w-full mt-6 rounded-full" variant="outline" asChild>
                   <Link href="/sign-in">선택하기</Link>
                 </Button>
               </CardContent>
@@ -213,8 +291,8 @@ export default function Home() {
           <p className="text-xl text-white/90 mb-8">
             10개의 무료 토큰으로 첫 웹툰을 만들어보세요
           </p>
-          <Button size="lg" variant="secondary" asChild>
-            <Link href="/sign-in">
+          <Button size="lg" variant="secondary" asChild className="rounded-full px-8">
+            <Link href="/studio">
               무료로 시작하기
               <ArrowRight className="ml-2 h-5 w-5" />
             </Link>

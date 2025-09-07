@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import TossPayments from "@tosspayments/payment-sdk";
+// import TossPayments from "@tosspayments/payment-sdk";
 import { prisma } from "@/lib/db/prisma";
 import { SubscriptionPlan } from "@/types";
 
-const tossPayments = new TossPayments(process.env.TOSS_SECRET_KEY!);
+// const tossPayments = new TossPayments(process.env.TOSS_SECRET_KEY!);
 
 // 플랜별 가격 정보
 const PLAN_PRICES = {
@@ -41,11 +41,11 @@ export async function POST(request: NextRequest) {
     }
 
     // 사용자 정보 가져오기
-    const user = await prisma.user.findUnique({
+    const dbUser = await prisma.user.findUnique({
       where: { supabaseId: user.id },
     });
 
-    if (!user) {
+    if (!dbUser) {
       return NextResponse.json(
         { success: false, error: "사용자를 찾을 수 없습니다" },
         { status: 404 }
@@ -53,13 +53,13 @@ export async function POST(request: NextRequest) {
     }
 
     // 주문 ID 생성
-    const orderId = `ORDER_${Date.now()}_${user.id}`;
+    const orderId = `ORDER_${Date.now()}_${dbUser.id}`;
     const amount = PLAN_PRICES[plan as SubscriptionPlan];
 
     // 거래 기록 생성 (대기 상태)
     await prisma.transaction.create({
       data: {
-        userId: user.id,
+        userId: dbUser.id,
         type: "SUBSCRIPTION",
         amount,
         tokens: PLAN_TOKENS[plan as SubscriptionPlan],
@@ -76,8 +76,8 @@ export async function POST(request: NextRequest) {
       orderName: `인스타툰 ${plan} 플랜 구독`,
       successUrl: successUrl || `${process.env.NEXT_PUBLIC_APP_URL}/api/payments/success`,
       failUrl: failUrl || `${process.env.NEXT_PUBLIC_APP_URL}/api/payments/fail`,
-      customerEmail: user.email,
-      customerName: user.name || "고객",
+      customerEmail: dbUser.email,
+      customerName: dbUser.name || "고객",
     };
 
     return NextResponse.json({
@@ -108,14 +108,14 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const user = await prisma.user.findUnique({
+    const dbUser = await prisma.user.findUnique({
       where: { supabaseId: user.id },
       include: {
         subscription: true,
       },
     });
 
-    if (!user) {
+    if (!dbUser) {
       return NextResponse.json(
         { success: false, error: "사용자를 찾을 수 없습니다" },
         { status: 404 }
@@ -124,7 +124,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      subscription: user.subscription,
+      subscription: dbUser.subscription,
     });
 
   } catch (error) {

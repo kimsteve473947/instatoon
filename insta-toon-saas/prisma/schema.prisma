@@ -8,13 +8,13 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-// 사용자 모델
+// 사용자 모델 (Supabase Auth와 연동)
 model User {
-  id                String         @id @default(cuid())
-  supabaseId        String         @unique
+  id                String         @id @default(uuid())
+  supabaseId        String         @unique // Supabase Auth의 user.id
   email             String         @unique
   name              String?
-  imageUrl          String?
+  avatarUrl         String?        // Supabase 필드명 통일
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
   
@@ -26,18 +26,19 @@ model User {
   characters        Character[]
   generations       Generation[]
   transactions      Transaction[]
-  referralCode      String         @unique @default(cuid())
+  referralCode      String         @unique @default(uuid())
   referredBy        String?
   referralRewards   ReferralReward[] @relation("referrer")
   referredRewards   ReferralReward[] @relation("referred")
   
   @@index([supabaseId])
   @@index([email])
+  @@map("user")
 }
 
 // 구독 모델
 model Subscription {
-  id                String         @id @default(cuid())
+  id                String         @id @default(uuid())
   userId            String         @unique
   user              User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   
@@ -49,8 +50,10 @@ model Subscription {
   maxProjects       Int            @default(3)
   
   // 결제 정보
-  tossCustomerId    String?
-  tossSubscriptionId String?
+  tossBillingKey    String?        // 빌링키 (정기결제용)
+  tossCustomerKey   String?        // 고객 고유 키
+  tossCustomerId    String?        // 토스 고객 ID (deprecated)
+  tossSubscriptionId String?       // 토스 구독 ID (deprecated)
   
   // 구독 기간
   currentPeriodStart DateTime      @default(now())
@@ -61,6 +64,7 @@ model Subscription {
   updatedAt         DateTime       @updatedAt
   
   @@index([userId])
+  @@map("subscription")
 }
 
 // 구독 플랜 enum
@@ -73,7 +77,7 @@ enum SubscriptionPlan {
 
 // 캐릭터 모델
 model Character {
-  id                String         @id @default(cuid())
+  id                String         @id @default(uuid())
   userId            String
   user              User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   
@@ -96,11 +100,12 @@ model Character {
   projects          ProjectCharacter[]
   
   @@index([userId])
+  @@map("character")
 }
 
 // 프로젝트 모델
 model Project {
-  id                String         @id @default(cuid())
+  id                String         @id @default(uuid())
   userId            String
   user              User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   
@@ -125,6 +130,7 @@ model Project {
   
   @@index([userId])
   @@index([status])
+  @@map("project")
 }
 
 // 프로젝트 상태 enum
@@ -138,7 +144,7 @@ enum ProjectStatus {
 
 // 프로젝트-캐릭터 관계 테이블
 model ProjectCharacter {
-  id                String         @id @default(cuid())
+  id                String         @id @default(uuid())
   projectId         String
   project           Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
   characterId       String
@@ -149,11 +155,12 @@ model ProjectCharacter {
   @@unique([projectId, characterId])
   @@index([projectId])
   @@index([characterId])
+  @@map("project_character")
 }
 
 // 패널 모델 (웹툰의 각 컷)
 model Panel {
-  id                String         @id @default(cuid())
+  id                String         @id @default(uuid())
   projectId         String
   project           Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
   
@@ -172,11 +179,12 @@ model Panel {
   
   @@unique([projectId, order])
   @@index([projectId])
+  @@map("panel")
 }
 
 // AI 생성 기록
 model Generation {
-  id                String         @id @default(cuid())
+  id                String         @id @default(uuid())
   userId            String
   user              User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   
@@ -207,11 +215,12 @@ model Generation {
   
   @@index([userId])
   @@index([projectId])
+  @@map("generation")
 }
 
 // 거래 내역
 model Transaction {
-  id                String         @id @default(cuid())
+  id                String         @id @default(uuid())
   userId            String
   user              User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   
@@ -231,6 +240,7 @@ model Transaction {
   
   @@index([userId])
   @@index([status])
+  @@map("transaction")
 }
 
 // 거래 유형 enum
@@ -252,7 +262,7 @@ enum TransactionStatus {
 
 // 추천인 보상 기록
 model ReferralReward {
-  id                String         @id @default(cuid())
+  id                String         @id @default(uuid())
   
   referrerId        String
   referrer          User           @relation("referrer", fields: [referrerId], references: [id], onDelete: Cascade)
@@ -267,4 +277,5 @@ model ReferralReward {
   @@unique([referrerId, referredId])
   @@index([referrerId])
   @@index([referredId])
+  @@map("referral_reward")
 }

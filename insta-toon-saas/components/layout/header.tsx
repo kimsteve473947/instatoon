@@ -112,33 +112,84 @@ export function Header() {
           </Link>
           
           <nav className="hidden md:flex items-center gap-6">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" className="text-sm font-medium hover:text-primary transition-colors">
+                  템플릿
+                  <ChevronDown className="ml-1 h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                <DropdownMenuItem asChild>
+                  <Link href="/gallery?category=romance">로맨스 웹툰</Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href="/gallery?category=action">액션 웹툰</Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href="/gallery?category=daily">일상 웹툰</Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href="/gallery?category=comedy">코미디 웹툰</Link>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" className="text-sm font-medium hover:text-primary transition-colors">
+                  추천 기능
+                  <ChevronDown className="ml-1 h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                <DropdownMenuItem asChild>
+                  <Link href="/studio">AI 웹툰 제작</Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href="/characters">캐릭터 관리</Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href="/templates">템플릿 커스터마이징</Link>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
             <Link 
               href="/pricing" 
               className="text-sm font-medium hover:text-primary transition-colors"
             >
-              가격
+              가격안내
             </Link>
+            
             <Link 
               href="/gallery" 
               className="text-sm font-medium hover:text-primary transition-colors"
             >
               갤러리
             </Link>
+            
+            <Link 
+              href="/guide" 
+              className="text-sm font-medium hover:text-primary transition-colors"
+            >
+              사용법
+            </Link>
+            
+            <Link 
+              href="/support" 
+              className="text-sm font-medium hover:text-primary transition-colors"
+            >
+              문의하기
+            </Link>
+
             {user && (
-              <>
-                <Link 
-                  href="/dashboard" 
-                  className="text-sm font-medium hover:text-primary transition-colors"
-                >
-                  대시보드
-                </Link>
-                <Link 
-                  href="/studio" 
-                  className="text-sm font-medium hover:text-primary transition-colors"
-                >
-                  스튜디오
-                </Link>
-              </>
+              <Link 
+                href="/dashboard" 
+                className="text-sm font-medium hover:text-primary transition-colors"
+              >
+                대시보드
+              </Link>
             )}
           </nav>
         </div>
@@ -232,9 +283,9 @@ export function Header() {
               <Button variant="ghost" asChild>
                 <Link href="/sign-in">로그인</Link>
               </Button>
-              <Button asChild className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700">
-                <Link href="/sign-in">
-                  무료로 시작하기
+              <Button asChild className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 rounded-full px-6">
+                <Link href="/studio">
+                  가입하기
                 </Link>
               </Button>
             </div>

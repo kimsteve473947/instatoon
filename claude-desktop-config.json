@@ -24,7 +24,7 @@
         "--project-ref=lzxkvtwuatsrczhctsxb"
       ],
       "env": {
-        "SUPABASE_ACCESS_TOKEN": "${SUPABASE_PAT}"
+        "SUPABASE_ACCESS_TOKEN": "sbp_7fa69616084177fe05864f7523e5e1c5103848a0"
       }
     }
   }

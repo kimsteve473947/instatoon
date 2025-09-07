@@ -4,7 +4,7 @@ export interface User {
   supabaseId: string;
   email: string;
   name?: string;
-  imageUrl?: string;
+  avatarUrl?: string;
   createdAt: Date;
   updatedAt: Date;
   referralCode: string;

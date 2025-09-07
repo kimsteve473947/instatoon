@@ -7,10 +7,11 @@ const plans = [
   {
     name: "무료",
     price: 0,
-    tokens: 10,
+    tokens: 30,
+    images: 3,
     description: "웹툰 제작을 시작해보세요",
     features: [
-      "월 10 토큰",
+      "월 30 토큰 (3이미지)",
       "캐릭터 1개 등록",
       "프로젝트 3개까지",
       "기본 해상도",
@@ -29,10 +30,11 @@ const plans = [
   {
     name: "개인",
     price: 30000,
-    tokens: 500000,
+    tokens: 6000,
+    images: 600,
     description: "개인 창작자를 위한 플랜",
     features: [
-      "월 50만 토큰",
+      "월 6,000 토큰 (600이미지)",
       "캐릭터 3개 등록",
       "무제한 프로젝트",
       "고해상도 출력",
@@ -50,10 +52,11 @@ const plans = [
   {
     name: "헤비유저",
     price: 100000,
-    tokens: 2000000,
+    tokens: 25000,
+    images: 2500,
     description: "전문 창작자를 위한 플랜",
     features: [
-      "월 200만 토큰",
+      "월 25,000 토큰 (2,500이미지)",
       "캐릭터 5개 등록",
       "무제한 프로젝트",
       "최고 해상도 출력",
@@ -71,10 +74,11 @@ const plans = [
   {
     name: "기업",
     price: 200000,
-    tokens: 5000000,
+    tokens: 60000,
+    images: 6000,
     description: "팀과 기업을 위한 플랜",
     features: [
-      "월 500만 토큰",
+      "월 60,000 토큰 (6,000이미지)",
       "무제한 캐릭터 등록",
       "무제한 프로젝트",
       "최고 해상도 출력",
@@ -134,6 +138,11 @@ export default function PricingPage() {
               
               <div className="text-sm text-muted-foreground">
                 {plan.tokens.toLocaleString()} 토큰/월
+                {plan.images && (
+                  <span className="block text-xs mt-1">
+                    (약 {plan.images.toLocaleString()}이미지 생성 가능)
+                  </span>
+                )}
               </div>
               
               <div className="space-y-2">
@@ -174,21 +183,25 @@ export default function PricingPage() {
             <CardContent className="pt-6">
               <div className="space-y-3">
                 <div className="flex justify-between">
-                  <span>기본 이미지 생성</span>
-                  <span className="font-medium">2 토큰</span>
+                  <span>기본 이미지 생성 (1024x1024)</span>
+                  <span className="font-medium">10 토큰</span>
                 </div>
                 <div className="flex justify-between">
-                  <span>고해상도 출력</span>
-                  <span className="font-medium">+1 토큰</span>
+                  <span>복잡한 프롬프트 (500자 이상)</span>
+                  <span className="font-medium">+5 토큰</span>
                 </div>
                 <div className="flex justify-between">
-                  <span>캐릭터 저장</span>
-                  <span className="font-medium">1 토큰</span>
+                  <span>레퍼런스 이미지 사용 (개당)</span>
+                  <span className="font-medium">+3 토큰</span>
                 </div>
                 <div className="flex justify-between">
-                  <span>레퍼런스 이미지 사용</span>
-                  <span className="font-medium">+1 토큰</span>
+                  <span>고해상도 출력 (2048x2048)</span>
+                  <span className="font-medium">+10 토큰</span>
                 </div>
+              </div>
+              <div className="mt-4 pt-4 border-t text-sm text-muted-foreground">
+                <p>토큰 가격: 1토큰 = 약 5원</p>
+                <p className="text-xs mt-1">* Google Gemini API 실제 비용 기반 책정</p>
               </div>
             </CardContent>
           </Card>
