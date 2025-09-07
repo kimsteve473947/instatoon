@@ -1,72 +1,95 @@
 import Link from "next/link";
-import { ArrowRight, Sparkles, Zap, Shield } from "lucide-react";
+import { ArrowRight, Sparkles, Zap, Shield, Star, Users, Palette, Check, Coins, ChevronRight } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default function Home() {
   return (
     <div className="flex flex-col min-h-screen">
       {/* 헤더 */}
-      <header className="border-b">
+      <header className="border-b sticky top-0 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 z-50">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-          <Link href="/" className="text-2xl font-bold">
-            인스타툰
+          <Link href="/" className="flex items-center gap-2">
+            <div className="bg-gradient-to-br from-purple-600 to-pink-600 rounded-lg p-1.5">
+              <Palette className="h-5 w-5 text-white" />
+            </div>
+            <span className="text-2xl font-bold">인스타툰</span>
           </Link>
           <nav className="flex items-center gap-6">
-            <Link href="/pricing" className="text-sm font-medium hover:text-primary">
+            <Link href="/pricing" className="text-sm font-medium hover:text-primary transition-colors">
               가격
             </Link>
-            <Link href="/gallery" className="text-sm font-medium hover:text-primary">
+            <Link href="/gallery" className="text-sm font-medium hover:text-primary transition-colors">
               갤러리
             </Link>
-            <Link
-              href="/sign-in"
-              className="text-sm font-medium hover:text-primary"
-            >
+            <Link href="/sign-in" className="text-sm font-medium hover:text-primary transition-colors">
               로그인
             </Link>
-            <Link
-              href="/sign-up"
-              className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-            >
-              무료로 시작하기
-            </Link>
+            <Button asChild className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700">
+              <Link href="/sign-up">
+                무료로 시작하기
+              </Link>
+            </Button>
           </nav>
         </div>
       </header>
 
       {/* 히어로 섹션 */}
-      <section className="flex-1 flex items-center justify-center py-20">
-        <div className="container mx-auto px-4">
+      <section className="relative flex-1 flex items-center justify-center py-20 overflow-hidden">
+        {/* 배경 그라데이션 */}
+        <div className="absolute inset-0 bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50 opacity-50" />
+        <div className="absolute inset-0 bg-[url('/grid.svg')] bg-center [mask-image:linear-gradient(180deg,white,rgba(255,255,255,0))]" />
+        
+        <div className="container relative mx-auto px-4">
           <div className="max-w-4xl mx-auto text-center">
-            <div className="inline-flex items-center rounded-full border px-4 py-1.5 text-sm font-medium mb-8">
-              <Sparkles className="mr-2 h-4 w-4" />
-              AI로 웹툰 제작이 쉬워집니다
+            <div className="inline-flex items-center rounded-full bg-gradient-to-r from-purple-100 to-pink-100 px-4 py-1.5 text-sm font-medium mb-8 border border-purple-200">
+              <Sparkles className="mr-2 h-4 w-4 text-purple-600" />
+              <span className="bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent font-semibold">
+                Gemini 2.5 Flash로 더 빠르고 정확하게
+              </span>
             </div>
             
-            <h1 className="text-5xl sm:text-6xl font-bold tracking-tight mb-6">
+            <h1 className="text-5xl sm:text-6xl lg:text-7xl font-bold tracking-tight mb-6">
               인스타그램 웹툰을
               <br />
-              <span className="text-primary">AI로 쉽고 빠르게</span>
+              <span className="bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
+                AI로 5분만에 제작
+              </span>
             </h1>
             
-            <p className="text-xl text-muted-foreground mb-8 max-w-2xl mx-auto">
-              캐릭터 일관성을 유지하면서 프로 수준의 웹툰을 제작하세요.
-              Gemini AI를 활용한 강력한 이미지 생성 기능을 경험해보세요.
+            <p className="text-xl text-muted-foreground mb-8 max-w-2xl mx-auto leading-relaxed">
+              <strong>캐릭터 일관성 99% 유지</strong>하면서 프로 수준의 웹툰을 제작하세요.
+              한국 웹툰 시장에 최적화된 AI 툴로 창작의 자유를 경험하세요.
             </p>
             
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Link
-                href="/sign-up"
-                className="inline-flex items-center justify-center rounded-md bg-primary px-8 py-3 text-base font-medium text-primary-foreground hover:bg-primary/90"
-              >
-                무료로 시작하기
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Link>
-              <Link
-                href="/gallery"
-                className="inline-flex items-center justify-center rounded-md border border-input bg-background px-8 py-3 text-base font-medium hover:bg-accent hover:text-accent-foreground"
-              >
-                작품 둘러보기
-              </Link>
+            <div className="flex flex-col sm:flex-row gap-4 justify-center mb-8">
+              <Button size="lg" asChild className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-lg px-8">
+                <Link href="/sign-up">
+                  무료로 시작하기
+                  <ArrowRight className="ml-2 h-5 w-5" />
+                </Link>
+              </Button>
+              <Button size="lg" variant="outline" asChild className="text-lg px-8">
+                <Link href="/studio">
+                  체험해보기
+                  <ChevronRight className="ml-2 h-5 w-5" />
+                </Link>
+              </Button>
+            </div>
+            
+            <div className="flex items-center justify-center gap-8 text-sm text-muted-foreground">
+              <div className="flex items-center gap-1">
+                <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
+                <span>4.9/5 평점</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <Users className="h-4 w-4" />
+                <span>10,000+ 창작자</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <Coins className="h-4 w-4" />
+                <span>무료 10토큰 제공</span>
+              </div>
             </div>
           </div>
         </div>
@@ -110,22 +133,119 @@ export default function Home() {
         </div>
       </section>
 
-      {/* CTA 섹션 */}
+      {/* 가격 섹션 */}
       <section className="py-20">
-        <div className="container mx-auto px-4 text-center">
-          <h2 className="text-3xl font-bold mb-4">
-            지금 시작하세요
+        <div className="container mx-auto px-4">
+          <h2 className="text-3xl font-bold text-center mb-4">
+            합리적인 가격으로 시작하세요
           </h2>
-          <p className="text-xl text-muted-foreground mb-8">
-            무료로 10개의 토큰을 받고 첫 웹툰을 만들어보세요
+          <p className="text-center text-muted-foreground mb-12">
+            창작 규모에 맞는 플랜을 선택하세요
           </p>
-          <Link
-            href="/sign-up"
-            className="inline-flex items-center justify-center rounded-md bg-primary px-8 py-3 text-base font-medium text-primary-foreground hover:bg-primary/90"
-          >
-            무료 회원가입
-            <ArrowRight className="ml-2 h-4 w-4" />
-          </Link>
+          
+          <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">
+            <Card>
+              <CardHeader>
+                <CardTitle>무료</CardTitle>
+                <CardDescription>취미로 시작하는 분들께</CardDescription>
+                <div className="text-3xl font-bold mt-4">₩0</div>
+              </CardHeader>
+              <CardContent>
+                <ul className="space-y-2">
+                  <li className="flex items-center gap-2">
+                    <Check className="h-4 w-4 text-green-500" />
+                    <span className="text-sm">10 토큰 제공</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <Check className="h-4 w-4 text-green-500" />
+                    <span className="text-sm">캐릭터 1개 등록</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <Check className="h-4 w-4 text-green-500" />
+                    <span className="text-sm">프로젝트 3개</span>
+                  </li>
+                </ul>
+                <Button className="w-full mt-6" variant="outline" asChild>
+                  <Link href="/sign-up">무료 시작</Link>
+                </Button>
+              </CardContent>
+            </Card>
+            
+            <Card className="border-purple-500 relative">
+              <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-gradient-to-r from-purple-600 to-pink-600 text-white text-xs px-3 py-1 rounded-full">
+                인기
+              </div>
+              <CardHeader>
+                <CardTitle>개인</CardTitle>
+                <CardDescription>정기적으로 창작하는 분들께</CardDescription>
+                <div className="text-3xl font-bold mt-4">₩30,000<span className="text-base font-normal">/월</span></div>
+              </CardHeader>
+              <CardContent>
+                <ul className="space-y-2">
+                  <li className="flex items-center gap-2">
+                    <Check className="h-4 w-4 text-green-500" />
+                    <span className="text-sm">50만 토큰 제공</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <Check className="h-4 w-4 text-green-500" />
+                    <span className="text-sm">캐릭터 3개 등록</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <Check className="h-4 w-4 text-green-500" />
+                    <span className="text-sm">무제한 프로젝트</span>
+                  </li>
+                </ul>
+                <Button className="w-full mt-6 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700" asChild>
+                  <Link href="/sign-up">선택하기</Link>
+                </Button>
+              </CardContent>
+            </Card>
+            
+            <Card>
+              <CardHeader>
+                <CardTitle>헤비유저</CardTitle>
+                <CardDescription>전문 창작자를 위한</CardDescription>
+                <div className="text-3xl font-bold mt-4">₩100,000<span className="text-base font-normal">/월</span></div>
+              </CardHeader>
+              <CardContent>
+                <ul className="space-y-2">
+                  <li className="flex items-center gap-2">
+                    <Check className="h-4 w-4 text-green-500" />
+                    <span className="text-sm">200만 토큰 제공</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <Check className="h-4 w-4 text-green-500" />
+                    <span className="text-sm">캐릭터 5개 등록</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <Check className="h-4 w-4 text-green-500" />
+                    <span className="text-sm">우선 지원</span>
+                  </li>
+                </ul>
+                <Button className="w-full mt-6" variant="outline" asChild>
+                  <Link href="/sign-up">선택하기</Link>
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </section>
+      
+      {/* CTA 섹션 */}
+      <section className="py-20 bg-gradient-to-r from-purple-600 to-pink-600">
+        <div className="container mx-auto px-4 text-center">
+          <h2 className="text-3xl font-bold mb-4 text-white">
+            지금 바로 창작을 시작하세요
+          </h2>
+          <p className="text-xl text-white/90 mb-8">
+            10개의 무료 토큰으로 첫 웹툰을 만들어보세요
+          </p>
+          <Button size="lg" variant="secondary" asChild>
+            <Link href="/sign-up">
+              무료로 시작하기
+              <ArrowRight className="ml-2 h-5 w-5" />
+            </Link>
+          </Button>
         </div>
       </section>
 

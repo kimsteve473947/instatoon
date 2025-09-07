@@ -1,55 +1,22 @@
-// import { auth } from "@clerk/nextjs/server";
-import { redirect } from "next/navigation";
+import { requireAuth } from "@/lib/supabase/auth";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { ArrowRight, Image, Coins, FolderOpen, Sparkles, TrendingUp, Calendar } from "lucide-react";
+import { ArrowRight, Image, Coins, FolderOpen, Sparkles } from "lucide-react";
 import Link from "next/link";
-import { prisma } from "@/lib/db/prisma";
-import { formatNumber, formatRelativeTime } from "@/lib/utils";
 
 export default async function DashboardPage() {
-  // const { userId } = await auth();
-  const userId = "temp-user-id"; // 임시 사용자 ID
-  
-  // if (!userId) {
-  //   redirect("/sign-in");
-  // }
+  const user = await requireAuth();
 
-  // 임시 데이터 (DB 연결 전)
-  const user = null;
-  /*
-  const user = await prisma.user.findUnique({
-    where: { clerkId: userId },
-    include: {
-      subscription: true,
-      projects: {
-        orderBy: { updatedAt: "desc" },
-        take: 6,
-      },
-      characters: true,
-      generations: {
-        where: {
-          createdAt: {
-            gte: new Date(new Date().setHours(0, 0, 0, 0)),
-          },
-        },
-      },
-    },
-  });
-  */
-
-  // 임시 데이터 사용
-
-  // 임시 통계 데이터
+  // 임시 통계 데이터 (실제로는 DB에서 가져와야 함)
   const stats = {
-    tokensUsed: 23,
-    tokensTotal: 500000,
-    projectsCount: 3,
-    projectsLimit: Infinity,
-    charactersCount: 2,
-    charactersLimit: 5,
-    generationsToday: 5,
+    tokensUsed: 0,
+    tokensTotal: 10,
+    projectsCount: 0,
+    projectsLimit: 3,
+    charactersCount: 0,
+    charactersLimit: 1,
+    generationsToday: 0,
   };
 
   const tokenUsagePercentage = (stats.tokensUsed / stats.tokensTotal) * 100;
@@ -59,7 +26,7 @@ export default async function DashboardPage() {
       <div className="mb-8">
         <h1 className="text-3xl font-bold">대시보드</h1>
         <p className="text-muted-foreground">
-          웹툰 제작을 시작하고 프로젝트를 관리하세요
+          안녕하세요, {user.email}님! 웹툰 제작을 시작하세요.
         </p>
       </div>
 

@@ -14,6 +14,18 @@
       "command": "npx", 
       "args": ["-y", "@modelcontextprotocol/server-sqlite", "--db-path", "/Users/gimjunghwi/Library/CloudStorage/GoogleDrive-kimjh473947@gmail.com/내 드라이브/인스타툰/data.db"],
       "env": {}
+    },
+    "supabase-trumpettour": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@supabase/mcp-server-supabase@latest",
+        "--project-ref=lzxkvtwuatsrczhctsxb"
+      ],
+      "env": {
+        "SUPABASE_ACCESS_TOKEN": "${SUPABASE_PAT}"
+      }
     }
   }
 }

@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db/prisma";
-import { SubscriptionPlan } from "@/types";
+import { SubscriptionPlan, TransactionType, TransactionStatus } from "@prisma/client";
 
 // 토큰 관리 서비스
 export class TokenManager {
@@ -32,10 +32,10 @@ export class TokenManager {
       await prisma.transaction.create({
         data: {
           userId,
-          type: "TOKEN_PURCHASE",
+          type: TransactionType.TOKEN_PURCHASE,
           tokens: -amount,
           amount: 0,
-          status: "COMPLETED",
+          status: TransactionStatus.COMPLETED,
           description: `토큰 사용: ${amount}개`,
         },
       });
@@ -87,10 +87,10 @@ export class TokenManager {
       await prisma.transaction.create({
         data: {
           userId,
-          type: "TOKEN_PURCHASE",
+          type: TransactionType.TOKEN_PURCHASE,
           tokens: amount,
           amount: 0,
-          status: "COMPLETED",
+          status: TransactionStatus.COMPLETED,
           description: `토큰 충전: ${amount}개`,
         },
       });

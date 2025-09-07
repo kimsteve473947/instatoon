@@ -11,7 +11,7 @@ datasource db {
 // 사용자 모델
 model User {
   id                String         @id @default(cuid())
-  clerkId           String         @unique
+  supabaseId        String         @unique
   email             String         @unique
   name              String?
   imageUrl          String?
@@ -31,7 +31,7 @@ model User {
   referralRewards   ReferralReward[] @relation("referrer")
   referredRewards   ReferralReward[] @relation("referred")
   
-  @@index([clerkId])
+  @@index([supabaseId])
   @@index([email])
 }
 

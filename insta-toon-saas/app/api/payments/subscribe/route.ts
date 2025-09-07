@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { createClient } from "@/lib/supabase/server";
 import TossPayments from "@tosspayments/payment-sdk";
 import { prisma } from "@/lib/db/prisma";
 import { SubscriptionPlan } from "@/types";
@@ -21,9 +21,10 @@ const PLAN_TOKENS = {
 
 export async function POST(request: NextRequest) {
   try {
-    const { userId } = await auth();
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
     
-    if (!userId) {
+    if (!user) {
       return NextResponse.json(
         { success: false, error: "인증이 필요합니다" },
         { status: 401 }
@@ -41,7 +42,7 @@ export async function POST(request: NextRequest) {
 
     // 사용자 정보 가져오기
     const user = await prisma.user.findUnique({
-      where: { clerkId: userId },
+      where: { supabaseId: user.id },
     });
 
     if (!user) {
@@ -97,9 +98,10 @@ export async function POST(request: NextRequest) {
 // 구독 상태 조회
 export async function GET(request: NextRequest) {
   try {
-    const { userId } = await auth();
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
     
-    if (!userId) {
+    if (!user) {
       return NextResponse.json(
         { success: false, error: "인증이 필요합니다" },
         { status: 401 }
@@ -107,7 +109,7 @@ export async function GET(request: NextRequest) {
     }
 
     const user = await prisma.user.findUnique({
-      where: { clerkId: userId },
+      where: { supabaseId: user.id },
       include: {
         subscription: true,
       },

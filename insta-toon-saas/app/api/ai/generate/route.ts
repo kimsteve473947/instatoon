@@ -1,19 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { createClient } from "@/lib/supabase/server";
 import { imageGenerationService, characterConsistencyManager } from "@/lib/ai/gemini-client";
 import { tokenManager } from "@/lib/subscription/token-manager";
 import { prisma } from "@/lib/db/prisma";
 
 export async function POST(request: NextRequest) {
   try {
-    const { userId } = await auth();
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
     
-    if (!userId) {
+    if (!user) {
       return NextResponse.json(
         { success: false, error: "인증이 필요합니다" },
         { status: 401 }
       );
     }
+    
+    const userId = user.id;
 
     const body = await request.json();
     const { prompt, characterIds, projectId, panelId, settings } = body;

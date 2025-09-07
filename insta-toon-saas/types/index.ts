@@ -1,7 +1,7 @@
 // 사용자 관련 타입
 export interface User {
   id: string;
-  clerkId: string;
+  supabaseId: string;
   email: string;
   name?: string;
   imageUrl?: string;
