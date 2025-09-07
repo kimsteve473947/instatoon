@@ -8,6 +8,12 @@ import Link from "next/link";
 export default async function DashboardPage() {
   const user = await requireAuth();
 
+  // 사용자 표시 이름 가져오기
+  const displayName = user.user_metadata?.full_name || 
+                     user.user_metadata?.name || 
+                     user.email?.split('@')[0] || 
+                     '사용자';
+
   // 임시 통계 데이터 (실제로는 DB에서 가져와야 함)
   const stats = {
     tokensUsed: 0,
@@ -26,7 +32,7 @@ export default async function DashboardPage() {
       <div className="mb-8">
         <h1 className="text-3xl font-bold">대시보드</h1>
         <p className="text-muted-foreground">
-          안녕하세요, {user.email}님! 웹툰 제작을 시작하세요.
+          안녕하세요, <span className="font-semibold text-foreground">{displayName}</span>님! 웹툰 제작을 시작하세요.
         </p>
       </div>
 

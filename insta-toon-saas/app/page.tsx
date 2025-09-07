@@ -1,38 +1,11 @@
 import Link from "next/link";
-import { ArrowRight, Sparkles, Zap, Shield, Star, Users, Palette, Check, Coins, ChevronRight } from "lucide-react";
+import { ArrowRight, Sparkles, Zap, Shield, Star, Users, Check, Coins, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default function Home() {
   return (
     <div className="flex flex-col min-h-screen">
-      {/* 헤더 */}
-      <header className="border-b sticky top-0 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 z-50">
-        <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2">
-            <div className="bg-gradient-to-br from-purple-600 to-pink-600 rounded-lg p-1.5">
-              <Palette className="h-5 w-5 text-white" />
-            </div>
-            <span className="text-2xl font-bold">인스타툰</span>
-          </Link>
-          <nav className="flex items-center gap-6">
-            <Link href="/pricing" className="text-sm font-medium hover:text-primary transition-colors">
-              가격
-            </Link>
-            <Link href="/gallery" className="text-sm font-medium hover:text-primary transition-colors">
-              갤러리
-            </Link>
-            <Link href="/sign-in" className="text-sm font-medium hover:text-primary transition-colors">
-              로그인
-            </Link>
-            <Button asChild className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700">
-              <Link href="/sign-up">
-                무료로 시작하기
-              </Link>
-            </Button>
-          </nav>
-        </div>
-      </header>
 
       {/* 히어로 섹션 */}
       <section className="relative flex-1 flex items-center justify-center py-20 overflow-hidden">
@@ -64,7 +37,7 @@ export default function Home() {
             
             <div className="flex flex-col sm:flex-row gap-4 justify-center mb-8">
               <Button size="lg" asChild className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-lg px-8">
-                <Link href="/sign-up">
+                <Link href="/sign-in">
                   무료로 시작하기
                   <ArrowRight className="ml-2 h-5 w-5" />
                 </Link>
@@ -166,7 +139,7 @@ export default function Home() {
                   </li>
                 </ul>
                 <Button className="w-full mt-6" variant="outline" asChild>
-                  <Link href="/sign-up">무료 시작</Link>
+                  <Link href="/sign-in">무료 시작</Link>
                 </Button>
               </CardContent>
             </Card>
@@ -196,7 +169,7 @@ export default function Home() {
                   </li>
                 </ul>
                 <Button className="w-full mt-6 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700" asChild>
-                  <Link href="/sign-up">선택하기</Link>
+                  <Link href="/sign-in">선택하기</Link>
                 </Button>
               </CardContent>
             </Card>
@@ -223,7 +196,7 @@ export default function Home() {
                   </li>
                 </ul>
                 <Button className="w-full mt-6" variant="outline" asChild>
-                  <Link href="/sign-up">선택하기</Link>
+                  <Link href="/sign-in">선택하기</Link>
                 </Button>
               </CardContent>
             </Card>
@@ -241,7 +214,7 @@ export default function Home() {
             10개의 무료 토큰으로 첫 웹툰을 만들어보세요
           </p>
           <Button size="lg" variant="secondary" asChild>
-            <Link href="/sign-up">
+            <Link href="/sign-in">
               무료로 시작하기
               <ArrowRight className="ml-2 h-5 w-5" />
             </Link>
