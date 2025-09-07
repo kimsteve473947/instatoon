@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>인스타툰 - AI 웹툰 제작 플랫폼</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1 class="logo">인스타툰</h1>
+            <p class="tagline">래퍼런스 이미지로 동일한 그림체의 웹툰을 만들어보세요</p>
+        </header>
+
+        <main class="main-content">
+            <div class="workflow-container">
+                <!-- Step 1: Reference Image Upload -->
+                <section class="step-section" id="step1">
+                    <div class="step-header">
+                        <span class="step-number">1</span>
+                        <h2>래퍼런스 이미지 업로드</h2>
+                    </div>
+                    <div class="upload-area" id="referenceUpload">
+                        <div class="upload-content">
+                            <div class="upload-icon">📸</div>
+                            <p>원하는 그림체의 래퍼런스 이미지를 드래그하거나 클릭하여 업로드하세요</p>
+                            <input type="file" id="referenceFile" accept="image/*" hidden>
+                            <button class="upload-btn" onclick="document.getElementById('referenceFile').click()">
+                                파일 선택
+                            </button>
+                        </div>
+                        <div class="image-preview" id="referencePreview" style="display: none;">
+                            <img id="referenceImg" src="" alt="래퍼런스 이미지">
+                            <button class="remove-btn" onclick="removeReference()">&times;</button>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Step 2: Advanced Settings & Story Content -->
+                <section class="step-section" id="step2">
+                    <div class="step-header">
+                        <span class="step-number">2</span>
+                        <h2>고급 설정 & 웹툰 내용</h2>
+                    </div>
+                    
+                    <!-- Advanced Style Options -->
+                    <div class="advanced-options">
+                        <div class="option-group">
+                            <label class="option-label">🎨 예술 스타일</label>
+                            <select id="artStyle" class="style-select">
+                                <option value="anime">애니메이션 스타일</option>
+                                <option value="digital_art">디지털 아트</option>
+                                <option value="sketch">스케치 스타일</option>
+                                <option value="watercolor">수채화</option>
+                                <option value="oil_painting">유화</option>
+                            </select>
+                        </div>
+                        
+                        <div class="option-group">
+                            <label class="option-label">📐 화면 비율</label>
+                            <select id="aspectRatio" class="style-select">
+                                <option value="vertical">세로형 (9:16) - 웹툰 추천</option>
+                                <option value="square">정사각형 (1:1)</option>
+                                <option value="horizontal">가로형 (16:9)</option>
+                                <option value="traditional">전통형 (4:3)</option>
+                            </select>
+                        </div>
+                        
+                        <div class="option-group">
+                            <label class="option-label">⭐ 품질 설정</label>
+                            <select id="quality" class="style-select">
+                                <option value="high">고품질 (최고 디테일)</option>
+                                <option value="medium">중품질 (균형)</option>
+                                <option value="low">저품질 (빠른 생성)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Story Content Input -->
+                    <div class="content-input">
+                        <textarea 
+                            id="storyContent" 
+                            placeholder="웹툰으로 만들고 싶은 이야기나 장면을 자세히 설명해주세요.&#10;예: 카페에서 따뜻한 커피를 마시며 책을 읽는 소녀. 창밖으로는 비가 내리고 있고, 소녀는 미소를 짓고 있다."
+                            rows="6"
+                        ></textarea>
+                        
+                        <!-- Additional Elements Input -->
+                        <div class="additional-elements">
+                            <label class="option-label">🔧 추가 요소 (선택사항)</label>
+                            <input type="text" id="additionalElements" 
+                                placeholder="배경, 소품, 특별한 효과 등 (쉼표로 구분): 벚꽃, 학교 유니폼, 따뜻한 조명">
+                        </div>
+                        
+                        <!-- Basic Options -->
+                        <div class="input-options">
+                            <label class="option">
+                                <input type="checkbox" id="maintainCharacter"> 
+                                캐릭터 일관성 유지
+                            </label>
+                            <label class="option">
+                                <input type="checkbox" id="multiPanel" checked> 
+                                다중 패널 생성
+                            </label>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Step 2.5: Advanced Features -->
+                <section class="step-section advanced-features" id="step2_5" style="display: none;">
+                    <div class="step-header">
+                        <span class="step-number">2.5</span>
+                        <h2>고급 기능</h2>
+                    </div>
+                    
+                    <div class="feature-tabs">
+                        <button class="tab-btn active" onclick="showTab('blend')">이미지 블렌딩</button>
+                        <button class="tab-btn" onclick="showTab('character')">캐릭터 생성</button>
+                    </div>
+                    
+                    <!-- Image Blending Feature -->
+                    <div class="feature-content" id="blend-content">
+                        <h3>🎨 이미지 블렌딩</h3>
+                        <p>여러 이미지를 조합하여 새로운 웹툰 패널을 만들어보세요</p>
+                        <div class="blend-upload-area">
+                            <input type="file" id="blendImages" multiple accept="image/*" hidden>
+                            <button class="upload-btn secondary" onclick="document.getElementById('blendImages').click()">
+                                이미지들 선택 (2-4개)
+                            </button>
+                        </div>
+                        <textarea id="blendPrompt" placeholder="어떻게 이미지들을 조합할지 설명하세요..." rows="3"></textarea>
+                        <button class="generate-btn secondary" onclick="blendImages()">이미지 블렌딩</button>
+                    </div>
+                    
+                    <!-- Character Generation Feature -->
+                    <div class="feature-content" id="character-content" style="display: none;">
+                        <h3>👤 캐릭터 레퍼런스 시트</h3>
+                        <p>일관된 캐릭터 디자인을 위한 레퍼런스 시트를 생성하세요</p>
+                        <textarea id="characterDescription" placeholder="캐릭터를 자세히 설명하세요: 나이, 외모, 성격, 복장 등..." rows="4"></textarea>
+                        <input type="text" id="characterPoses" placeholder="포즈들 (쉼표 구분): 서있기, 앉기, 걷기, 뛰기">
+                        <button class="generate-btn secondary" onclick="generateCharacter()">캐릭터 생성</button>
+                    </div>
+                </section>
+
+                <!-- Step 3: Generate Webtoon -->
+                <section class="step-section" id="step3">
+                    <div class="step-header">
+                        <span class="step-number">3</span>
+                        <h2>웹툰 생성</h2>
+                    </div>
+                    <div class="generate-section">
+                        <button class="generate-btn" id="generateBtn" onclick="generateWebtoon()">
+                            <span class="btn-text">🎨 웹툰 생성하기</span>
+                            <div class="loading-spinner" style="display: none;"></div>
+                        </button>
+                        <button class="secondary-btn" onclick="toggleAdvancedFeatures()" id="advancedBtn">
+                            <span>⚙️ 고급 기능</span>
+                        </button>
+                        <p class="generation-note">
+                            생성에는 1-2분 정도 소요될 수 있습니다
+                        </p>
+                    </div>
+                </section>
+
+                <!-- Step 4: Results -->
+                <section class="step-section" id="step4" style="display: none;">
+                    <div class="step-header">
+                        <span class="step-number">4</span>
+                        <h2>생성 결과</h2>
+                    </div>
+                    <div class="results-container" id="resultsContainer">
+                        <!-- Generated webtoon panels will be displayed here -->
+                    </div>
+                    <div class="action-buttons" style="display: none;" id="actionButtons">
+                        <button class="secondary-btn" onclick="regenerate()">다시 생성</button>
+                        <button class="primary-btn" onclick="downloadWebtoon()">다운로드</button>
+                        <button class="primary-btn" onclick="shareWebtoon()">공유하기</button>
+                    </div>
+                </section>
+            </div>
+        </main>
+
+        <footer class="footer">
+            <p>&copy; 2024 인스타툰. Powered by Google Nano Banana AI</p>
+        </footer>
+    </div>
+
+    <!-- Loading Modal -->
+    <div class="modal" id="loadingModal" style="display: none;">
+        <div class="modal-content">
+            <div class="loading-animation"></div>
+            <h3>웹툰 생성 중...</h3>
+            <p id="loadingStatus">래퍼런스 이미지 분석 중</p>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/main.js"></script>
+</body>
+</html>

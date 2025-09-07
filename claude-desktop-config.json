@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "instartoon": {
+      "command": "node",
+      "args": ["/Users/gimjunghwi/Library/CloudStorage/GoogleDrive-kimjh473947@gmail.com/내 드라이브/인스타툰/simple-mcp-server.js"],
+      "cwd": "/Users/gimjunghwi/Library/CloudStorage/GoogleDrive-kimjh473947@gmail.com/내 드라이브/인스타툰"
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/Users/gimjunghwi/Library/CloudStorage/GoogleDrive-kimjh473947@gmail.com/내 드라이브/인스타툰"],
+      "env": {}
+    },
+    "sqlite": {
+      "command": "npx", 
+      "args": ["-y", "@modelcontextprotocol/server-sqlite", "--db-path", "/Users/gimjunghwi/Library/CloudStorage/GoogleDrive-kimjh473947@gmail.com/내 드라이브/인스타툰/data.db"],
+      "env": {}
+    }
+  }
+}

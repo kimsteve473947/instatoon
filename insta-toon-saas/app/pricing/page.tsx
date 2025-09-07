@@ -1,0 +1,204 @@
+import { Check, X } from "lucide-react";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import Link from "next/link";
+
+const plans = [
+  {
+    name: "무료",
+    price: 0,
+    tokens: 10,
+    description: "웹툰 제작을 시작해보세요",
+    features: [
+      "월 10 토큰",
+      "캐릭터 1개 등록",
+      "프로젝트 3개까지",
+      "기본 해상도",
+      "커뮤니티 지원",
+    ],
+    limitations: [
+      "고해상도 출력",
+      "우선 생성 대기열",
+      "상업적 이용",
+      "1:1 지원",
+    ],
+    cta: "무료로 시작",
+    href: "/sign-up",
+    popular: false,
+  },
+  {
+    name: "개인",
+    price: 30000,
+    tokens: 500000,
+    description: "개인 창작자를 위한 플랜",
+    features: [
+      "월 50만 토큰",
+      "캐릭터 3개 등록",
+      "무제한 프로젝트",
+      "고해상도 출력",
+      "이메일 지원",
+      "상업적 이용 가능",
+    ],
+    limitations: [
+      "우선 생성 대기열",
+      "1:1 전담 지원",
+    ],
+    cta: "구독하기",
+    href: "/dashboard/billing?plan=personal",
+    popular: true,
+  },
+  {
+    name: "헤비유저",
+    price: 100000,
+    tokens: 2000000,
+    description: "전문 창작자를 위한 플랜",
+    features: [
+      "월 200만 토큰",
+      "캐릭터 5개 등록",
+      "무제한 프로젝트",
+      "최고 해상도 출력",
+      "우선 생성 대기열",
+      "상업적 이용 가능",
+      "1:1 지원",
+    ],
+    limitations: [
+      "API 접근",
+    ],
+    cta: "구독하기",
+    href: "/dashboard/billing?plan=heavy",
+    popular: false,
+  },
+  {
+    name: "기업",
+    price: 200000,
+    tokens: 5000000,
+    description: "팀과 기업을 위한 플랜",
+    features: [
+      "월 500만 토큰",
+      "무제한 캐릭터 등록",
+      "무제한 프로젝트",
+      "최고 해상도 출력",
+      "최우선 생성 대기열",
+      "상업적 이용 가능",
+      "전담 매니저",
+      "API 접근",
+      "맞춤 기능 개발",
+    ],
+    limitations: [],
+    cta: "문의하기",
+    href: "/contact",
+    popular: false,
+  },
+];
+
+export default function PricingPage() {
+  return (
+    <div className="container mx-auto px-4 py-16">
+      <div className="text-center mb-12">
+        <h1 className="text-4xl font-bold mb-4">
+          합리적인 가격으로 시작하세요
+        </h1>
+        <p className="text-xl text-muted-foreground">
+          토큰 기반 과금으로 사용한 만큼만 비용을 지불합니다
+        </p>
+      </div>
+
+      <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 max-w-7xl mx-auto">
+        {plans.map((plan) => (
+          <Card
+            key={plan.name}
+            className={`relative ${
+              plan.popular ? "border-primary shadow-lg scale-105" : ""
+            }`}
+          >
+            {plan.popular && (
+              <div className="absolute -top-4 left-1/2 transform -translate-x-1/2">
+                <span className="bg-primary text-primary-foreground px-3 py-1 rounded-full text-sm font-medium">
+                  인기
+                </span>
+              </div>
+            )}
+            
+            <CardHeader>
+              <CardTitle className="text-2xl">{plan.name}</CardTitle>
+              <CardDescription>{plan.description}</CardDescription>
+            </CardHeader>
+            
+            <CardContent className="space-y-4">
+              <div>
+                <span className="text-4xl font-bold">
+                  ₩{plan.price.toLocaleString()}
+                </span>
+                <span className="text-muted-foreground">/월</span>
+              </div>
+              
+              <div className="text-sm text-muted-foreground">
+                {plan.tokens.toLocaleString()} 토큰/월
+              </div>
+              
+              <div className="space-y-2">
+                {plan.features.map((feature) => (
+                  <div key={feature} className="flex items-start gap-2">
+                    <Check className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
+                    <span className="text-sm">{feature}</span>
+                  </div>
+                ))}
+                
+                {plan.limitations.map((limitation) => (
+                  <div key={limitation} className="flex items-start gap-2">
+                    <X className="h-4 w-4 text-gray-400 mt-0.5 flex-shrink-0" />
+                    <span className="text-sm text-gray-500">{limitation}</span>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+            
+            <CardFooter>
+              <Link href={plan.href} className="w-full">
+                <Button
+                  className="w-full"
+                  variant={plan.popular ? "default" : "outline"}
+                >
+                  {plan.cta}
+                </Button>
+              </Link>
+            </CardFooter>
+          </Card>
+        ))}
+      </div>
+
+      <div className="mt-16 text-center">
+        <h2 className="text-2xl font-bold mb-4">토큰 사용량 안내</h2>
+        <div className="max-w-2xl mx-auto">
+          <Card>
+            <CardContent className="pt-6">
+              <div className="space-y-3">
+                <div className="flex justify-between">
+                  <span>기본 이미지 생성</span>
+                  <span className="font-medium">2 토큰</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>고해상도 출력</span>
+                  <span className="font-medium">+1 토큰</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>캐릭터 저장</span>
+                  <span className="font-medium">1 토큰</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>레퍼런스 이미지 사용</span>
+                  <span className="font-medium">+1 토큰</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      <div className="mt-12 text-center text-sm text-muted-foreground">
+        <p>모든 플랜은 언제든지 변경하거나 취소할 수 있습니다</p>
+        <p>VAT 별도 · 법인카드 결제 가능</p>
+      </div>
+    </div>
+  );
+}
