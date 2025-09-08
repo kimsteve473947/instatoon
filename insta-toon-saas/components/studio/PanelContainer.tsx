@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import { Panel } from "@/lib/stores/studio-store";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -10,7 +11,9 @@ import {
   Copy, 
   Trash2, 
   MoreHorizontal,
-  Loader2
+  Loader2,
+  Edit3,
+  RefreshCw
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -19,13 +22,16 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { CANVAS_SIZES, type CanvasRatio } from "@/types/editor";
 
 interface PanelContainerProps {
   panel: Panel;
   index: number;
   isActive: boolean;
+  canvasRatio: CanvasRatio;
   onSelect: () => void;
   onGenerate: () => void;
+  onEdit?: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
 }
@@ -34,22 +40,31 @@ export function PanelContainer({
   panel,
   index,
   isActive,
+  canvasRatio,
   onSelect,
   onGenerate,
+  onEdit,
   onDuplicate,
   onDelete,
 }: PanelContainerProps) {
   const [isHovered, setIsHovered] = useState(false);
 
+  const canvasSize = CANVAS_SIZES[canvasRatio];
+  const aspectRatio = canvasRatio === '4:5' ? '4/5' : '1/1';
+
   return (
     <div
       className={cn(
-        "group relative w-80 aspect-square rounded-lg transition-all duration-200 cursor-pointer",
+        "group relative rounded-lg transition-all duration-200 cursor-pointer",
         "border-2 bg-white shadow-sm hover:shadow-md",
         isActive 
           ? "border-blue-500 ring-2 ring-blue-200" 
           : "border-gray-200 hover:border-gray-300"
       )}
+      style={{
+        width: '100%',
+        aspectRatio: aspectRatio
+      }}
       onClick={onSelect}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
@@ -76,10 +91,28 @@ export function PanelContainer({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onGenerate(); }}>
-              <Wand2 className="h-4 w-4 mr-2" />
-              {panel.imageUrl ? "재생성" : "생성"}
-            </DropdownMenuItem>
+            {!panel.imageUrl ? (
+              // 이미지가 없을 때 - 생성 버튼
+              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onGenerate(); }}>
+                <Wand2 className="h-4 w-4 mr-2" />
+                이미지 생성
+              </DropdownMenuItem>
+            ) : (
+              // 이미지가 있을 때 - 재생성 & 수정하기
+              <>
+                <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onGenerate(); }}>
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  재생성
+                </DropdownMenuItem>
+                {onEdit && (
+                  <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onEdit(); }}>
+                    <Edit3 className="h-4 w-4 mr-2" />
+                    수정하기
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuSeparator />
+              </>
+            )}
             <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onDuplicate(); }}>
               <Copy className="h-4 w-4 mr-2" />
               복제
@@ -108,15 +141,19 @@ export function PanelContainer({
         ) : panel.imageUrl ? (
           // 생성된 이미지
           <div className="relative w-full h-full">
-            <img
+            <Image
               src={panel.imageUrl}
               alt={`패널 ${index + 1}`}
-              className="w-full h-full object-cover"
+              fill
+              className="object-cover"
+              sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+              priority={index < 2}
+              quality={85}
             />
             
             {/* 이미지 위 오버레이 정보 */}
             <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-3">
-              <div className="flex items-center justify-between text-white text-xs">
+              <div className="flex items-center justify-between text-white text-xs mb-3">
                 <div className="flex items-center gap-2">
                   {panel.characters && panel.characters.length > 0 && (
                     <div className="flex items-center gap-1">
@@ -138,6 +175,30 @@ export function PanelContainer({
                     </span>
                   )}
                 </div>
+              </div>
+              
+              {/* 액션 버튼들 */}
+              <div className="flex gap-2">
+                <Button 
+                  size="sm" 
+                  variant="secondary"
+                  onClick={(e) => { e.stopPropagation(); onGenerate(); }}
+                  className="flex-1"
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  재생성
+                </Button>
+                {onEdit && (
+                  <Button 
+                    size="sm" 
+                    variant="default"
+                    onClick={(e) => { e.stopPropagation(); onEdit(); }}
+                    className="flex-1"
+                  >
+                    <Edit3 className="h-4 w-4 mr-2" />
+                    수정하기
+                  </Button>
+                )}
               </div>
             </div>
           </div>

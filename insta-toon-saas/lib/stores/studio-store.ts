@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
+import { type CanvasRatio } from '@/types/editor';
 
 // 패널 타입 정의
 export interface Panel {
@@ -56,6 +57,7 @@ interface StudioState {
   sidebarCollapsed: boolean;
   canvasZoom: number;
   canvasGrid: boolean;
+  canvasRatio: CanvasRatio;
   
   // 생성 상태
   isGenerating: boolean;
@@ -94,8 +96,9 @@ interface StudioActions {
   setActiveCharacters: (characterIds: string[]) => void;
   
   // 생성 액션
-  generatePanel: (index: number) => Promise<void>;
-  generateBatch: (indices: number[]) => Promise<void>;
+  generatePanel: (index: number, canvasRatio?: CanvasRatio) => Promise<void>;
+  editPanel: (index: number, editPrompt: string, canvasRatio?: CanvasRatio) => Promise<void>;
+  generateBatch: (indices: number[], canvasRatio?: CanvasRatio) => Promise<void>;
   cancelGeneration: () => void;
   
   // UI 액션
@@ -133,6 +136,7 @@ export const useStudioStore = create<StudioState & StudioActions>()(
       sidebarCollapsed: false,
       canvasZoom: 1,
       canvasGrid: true,
+      canvasRatio: '4:5',
       isGenerating: false,
       generationQueue: [],
       tokenBalance: 0,
@@ -167,33 +171,130 @@ export const useStudioStore = create<StudioState & StudioActions>()(
       },
 
       loadProject: async (projectId) => {
-        // TODO: API에서 프로젝트 로드
-        console.log('Loading project:', projectId);
+        try {
+          const response = await fetch(`/api/studio/load-project?projectId=${projectId}`);
+          const data = await response.json();
+          
+          if (data.success) {
+            set({
+              currentProject: data.currentProject,
+              panels: data.panels,
+              activePanel: data.panels.length > 0 ? 0 : null,
+            });
+          } else {
+            console.error('Failed to load project:', data.error);
+            alert(data.error);
+          }
+        } catch (error) {
+          console.error('Load project error:', error);
+          alert('프로젝트 로드 중 오류가 발생했습니다');
+        }
       },
 
       saveProject: async () => {
         const { currentProject, panels } = get();
         if (!currentProject) return;
         
-        set((state) => ({
+        set({
           currentProject: {
             ...currentProject,
-            panels,
-            updatedAt: new Date(),
             isAutoSaving: true,
           }
-        }));
+        });
         
-        // TODO: API로 프로젝트 저장
-        
-        setTimeout(() => {
+        try {
+          // 개발 모드에서는 로컬 스토리지에 저장
+          if (process.env.NODE_ENV === 'development') {
+            const projectData = {
+              id: currentProject.id || `project-${Date.now()}`,
+              title: currentProject.name,
+              panels: panels,
+              createdAt: currentProject.createdAt || new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              panelCount: panels.length,
+              status: 'draft' as const,
+            };
+            
+            // 로컬 스토리지에서 기존 프로젝트 로드
+            const savedProjects = localStorage.getItem('instatoon_projects');
+            let projects = savedProjects ? JSON.parse(savedProjects) : [];
+            
+            // 기존 프로젝트 업데이트 또는 새 프로젝트 추가
+            const existingIndex = projects.findIndex((p: any) => p.id === projectData.id);
+            if (existingIndex >= 0) {
+              projects[existingIndex] = projectData;
+            } else {
+              projects.unshift(projectData);
+            }
+            
+            // 저장
+            localStorage.setItem('instatoon_projects', JSON.stringify(projects.slice(0, 50)));
+            console.log('Project saved to local storage');
+            
+            set((state) => ({
+              currentProject: state.currentProject ? {
+                ...state.currentProject,
+                id: projectData.id,
+                updatedAt: new Date(),
+                isAutoSaving: false,
+              } : null
+            }));
+            
+            return;
+          }
+          
+          // 프로덕션 모드: API 호출
+          const response = await fetch('/api/studio/save-project', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              projectId: currentProject.id === `project-${Date.now()}` ? null : currentProject.id,
+              projectName: currentProject.name,
+              panels: panels,
+            }),
+          });
+
+          const data = await response.json();
+          
+          if (data.success) {
+            set((state) => ({
+              currentProject: state.currentProject ? {
+                ...state.currentProject,
+                id: data.projectId,
+                updatedAt: new Date(),
+                isAutoSaving: false,
+              } : null
+            }));
+            
+            // 프로젝트가 성공적으로 저장되면 자동 저장 활성화
+            const autoSaveInterval = setInterval(async () => {
+              const currentState = get();
+              if (currentState.currentProject && !currentState.currentProject.isAutoSaving) {
+                await currentState.saveProject();
+              }
+            }, 30000); // 30초마다 자동 저장
+
+            // 스토어에 인터벌 ID 저장 (필요시 정리용)
+            set((state) => ({
+              ...state,
+              autoSaveInterval: autoSaveInterval
+            }));
+            
+          } else {
+            console.error('Failed to save project:', data.error);
+            alert(data.error);
+          }
+        } catch (error) {
+          console.error('Save project error:', error);
+          alert('프로젝트 저장 중 오류가 발생했습니다');
+        } finally {
           set((state) => ({
             currentProject: state.currentProject ? {
               ...state.currentProject,
               isAutoSaving: false,
             } : null
           }));
-        }, 1000);
+        }
       },
 
       renameProject: (name) => {
@@ -351,10 +452,16 @@ export const useStudioStore = create<StudioState & StudioActions>()(
       },
 
       // 생성 액션
-      generatePanel: async (index) => {
+      generatePanel: async (index, canvasRatio?: CanvasRatio) => {
         const { panels, activeCharacters, selectedStyle, selectedEmotion } = get();
         const panel = panels[index];
         if (!panel || !panel.prompt) return;
+        
+        // 캔버스 비율 정보 추가
+        const aspectRatio = canvasRatio || '4:5';
+        const aspectInfo = aspectRatio === '4:5' 
+          ? { width: 800, height: 1000, description: 'vertical Instagram format (4:5)' }
+          : { width: 800, height: 800, description: 'square Instagram format (1:1)' };
 
         // 패널 생성 상태 업데이트
         set((state) => {
@@ -373,13 +480,18 @@ export const useStudioStore = create<StudioState & StudioActions>()(
               settings: {
                 style: selectedStyle,
                 emotion: selectedEmotion,
+                aspectRatio: aspectRatio,
+                width: aspectInfo.width,
+                height: aspectInfo.height,
               },
             }),
           });
 
           const data = await response.json();
+          console.log('🔍 API Response:', data);
 
           if (data.success) {
+            console.log('✅ Updating panel with imageUrl:', data.imageUrl);
             set((state) => {
               const newPanels = [...state.panels];
               newPanels[index] = {
@@ -391,6 +503,7 @@ export const useStudioStore = create<StudioState & StudioActions>()(
                 tokensUsed: data.tokensUsed,
                 characters: data.detectedCharacters,
               };
+              console.log('📝 Updated panel:', newPanels[index]);
               return { 
                 panels: newPanels, 
                 isGenerating: false,
@@ -410,9 +523,85 @@ export const useStudioStore = create<StudioState & StudioActions>()(
         }
       },
 
-      generateBatch: async (indices) => {
+      editPanel: async (index, editPrompt, canvasRatio?: CanvasRatio) => {
+        const { panels, activeCharacters, selectedStyle, selectedEmotion } = get();
+        const panel = panels[index];
+        if (!panel || !panel.imageUrl) return;
+        
+        // 캔버스 비율 정보 추가
+        const aspectRatio = canvasRatio || '4:5';
+        const aspectInfo = aspectRatio === '4:5' 
+          ? { width: 800, height: 1000, description: 'vertical Instagram format (4:5)' }
+          : { width: 800, height: 800, description: 'square Instagram format (1:1)' };
+
+        // 패널 편집 상태 업데이트
+        set((state) => {
+          const newPanels = [...state.panels];
+          newPanels[index] = { ...newPanels[index], isGenerating: true };
+          return { panels: newPanels, isGenerating: true };
+        });
+
+        try {
+          const response = await fetch('/api/ai/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              prompt: editPrompt, // 수정 프롬프트 사용
+              characterIds: activeCharacters,
+              referenceImage: panel.imageUrl, // 기존 이미지를 참조로 사용
+              editMode: true, // 편집 모드 플래그
+              settings: {
+                style: selectedStyle,
+                emotion: selectedEmotion,
+                aspectRatio: aspectRatio,
+                width: aspectInfo.width,
+                height: aspectInfo.height,
+              },
+            }),
+          });
+
+          const data = await response.json();
+          console.log('🔍 Edit API Response:', data);
+
+          if (data.success) {
+            console.log('✅ Updating panel with edited imageUrl:', data.imageUrl);
+            set((state) => {
+              const newPanels = [...state.panels];
+              newPanels[index] = {
+                ...newPanels[index],
+                imageUrl: data.imageUrl,
+                thumbnailUrl: data.thumbnailUrl,
+                isGenerating: false,
+                generatedAt: new Date(),
+                tokensUsed: data.tokensUsed,
+                characters: data.detectedCharacters,
+              };
+              console.log('📝 Updated edited panel:', newPanels[index]);
+              return { 
+                panels: newPanels, 
+                isGenerating: false,
+                tokenBalance: data.remainingTokens || state.tokenBalance,
+              };
+            });
+          } else {
+            throw new Error(data.error);
+          }
+        } catch (error) {
+          console.error('Edit failed:', error);
+          alert(error instanceof Error ? error.message : "이미지 수정 중 오류가 발생했습니다.");
+          
+          // 생성 실패 시 상태 복원
+          set((state) => {
+            const newPanels = [...state.panels];
+            newPanels[index] = { ...newPanels[index], isGenerating: false };
+            return { panels: newPanels, isGenerating: false };
+          });
+        }
+      },
+
+      generateBatch: async (indices, canvasRatio) => {
         for (const index of indices) {
-          await get().generatePanel(index);
+          await get().generatePanel(index, canvasRatio);
           // 배치 생성 시 1초 대기 (API 레이트 리밋 고려)
           await new Promise(resolve => setTimeout(resolve, 1000));
         }

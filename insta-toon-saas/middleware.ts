@@ -49,6 +49,12 @@ export async function middleware(request: NextRequest) {
 
     // 보호된 경로에 비로그인 사용자가 접근하는 경우
     if (!user && isProtected) {
+      // 개발 모드에서는 API 경로 인증 우회
+      if (process.env.NODE_ENV === 'development' && path.startsWith('/api/')) {
+        console.log(`Development mode: Bypassing auth for API path: ${path}`);
+        return supabaseResponse;
+      }
+      
       const redirectUrl = request.nextUrl.clone()
       redirectUrl.pathname = '/sign-in'
       return NextResponse.redirect(redirectUrl)

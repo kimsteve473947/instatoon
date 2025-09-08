@@ -108,7 +108,7 @@ CREATE TABLE generations (
   prompt TEXT NOT NULL,
   image_url TEXT,
   thumbnail_url TEXT,
-  model TEXT DEFAULT 'gemini-2.0-flash-exp',
+  model TEXT DEFAULT 'gemini-2.5-flash-image-preview',
   tokens_used INTEGER DEFAULT 2,
   metadata JSONB,
   created_at TIMESTAMPTZ DEFAULT NOW()

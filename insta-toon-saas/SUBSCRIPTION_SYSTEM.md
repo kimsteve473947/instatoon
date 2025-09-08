@@ -35,9 +35,9 @@
 - `/api/cron/billing`: 자동 결제 크론잡
 
 #### 3. 프론트엔드
-- `/dashboard/billing`: 구독 관리 대시보드
-- `/dashboard/billing/success`: 결제 성공 페이지
-- `/dashboard/billing/error`: 결제 실패 페이지
+- `/pricing`: 구독 관리 및 결제 페이지
+- `/pricing/success`: 결제 성공 페이지
+- `/pricing/error`: 결제 실패 페이지
 
 ## 결제 플로우
 

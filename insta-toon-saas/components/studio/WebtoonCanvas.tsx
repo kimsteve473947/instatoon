@@ -15,9 +15,22 @@ import {
   Copy,
   Play
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 import { PanelContainer } from "./PanelContainer";
+import { CANVAS_SIZES, type CanvasRatio } from "@/types/editor";
 
-export function WebtoonCanvas() {
+interface WebtoonCanvasProps {
+  canvasRatio: CanvasRatio;
+}
+
+export function WebtoonCanvas({ canvasRatio }: WebtoonCanvasProps) {
   const {
     panels,
     activePanel,
@@ -31,6 +44,7 @@ export function WebtoonCanvas() {
     removePanel,
     duplicatePanel,
     generatePanel,
+    editPanel,
     generateBatch,
   } = useStudioStore();
 
@@ -38,6 +52,9 @@ export function WebtoonCanvas() {
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [canvasOffset, setCanvasOffset] = useState({ x: 0, y: 0 });
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editingPanelIndex, setEditingPanelIndex] = useState<number | null>(null);
+  const [editPrompt, setEditPrompt] = useState("");
 
   // 캔버스 줌 조절
   const handleZoomIn = () => setCanvasZoom(canvasZoom * 1.2);
@@ -116,8 +133,28 @@ export function WebtoonCanvas() {
       .filter(index => panels[index].prompt && !panels[index].imageUrl);
     
     if (indicesToGenerate.length > 0) {
-      await generateBatch(indicesToGenerate);
+      await generateBatch(indicesToGenerate, canvasRatio);
     }
+  };
+
+  // 패널 수정 핸들러
+  const handleEditPanel = (index: number) => {
+    const panel = panels[index];
+    if (!panel?.imageUrl) return;
+
+    setEditingPanelIndex(index);
+    setEditPrompt("");
+    setEditModalOpen(true);
+  };
+
+  // 수정 실행
+  const handleEditSubmit = async () => {
+    if (editingPanelIndex === null || !editPrompt.trim()) return;
+    
+    setEditModalOpen(false);
+    await editPanel(editingPanelIndex, editPrompt, canvasRatio);
+    setEditingPanelIndex(null);
+    setEditPrompt("");
   };
 
   return (
@@ -228,15 +265,23 @@ export function WebtoonCanvas() {
               </Button>
             </div>
           ) : (
-            <div className="max-w-md space-y-4">
+            <div 
+              className="space-y-4"
+              style={{
+                width: `${CANVAS_SIZES[canvasRatio].width}px`,
+                maxWidth: '100%'
+              }}
+            >
               {panels.map((panel, index) => (
                 <PanelContainer
                   key={panel.id}
                   panel={panel}
                   index={index}
                   isActive={activePanel === index}
+                  canvasRatio={canvasRatio}
                   onSelect={() => selectPanel(index)}
-                  onGenerate={() => generatePanel(index)}
+                  onGenerate={() => generatePanel(index, canvasRatio)}
+                  onEdit={() => handleEditPanel(index)}
                   onDuplicate={() => duplicatePanel(index)}
                   onDelete={() => removePanel(index)}
                 />
@@ -268,6 +313,46 @@ export function WebtoonCanvas() {
           </div>
         )}
       </div>
+
+      {/* 편집 모달 */}
+      <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>이미지 수정하기</DialogTitle>
+            <DialogDescription>
+              기존 이미지를 참조하여 수정할 내용을 입력하세요. 구체적으로 어떤 부분을 어떻게 바꿀지 설명해주세요.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label htmlFor="edit-prompt" className="text-sm font-medium">
+                수정 사항
+              </label>
+              <Textarea
+                id="edit-prompt"
+                placeholder="예: 캐릭터의 표정을 웃는 얼굴로 바꿔주세요, 배경을 밤 풍경으로 변경해주세요..."
+                value={editPrompt}
+                onChange={(e) => setEditPrompt(e.target.value)}
+                className="mt-1 min-h-[100px]"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button 
+                variant="outline" 
+                onClick={() => setEditModalOpen(false)}
+              >
+                취소
+              </Button>
+              <Button 
+                onClick={handleEditSubmit}
+                disabled={!editPrompt.trim()}
+              >
+                수정하기
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

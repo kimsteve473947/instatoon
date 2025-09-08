@@ -1,12 +1,9 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 
-// Gemini 클라이언트 초기화
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY!);
-
-// 모델 설정 - Gemini 2.5 Flash (Nano Banana) 사용
-// Gemini 2.5 Flash는 이미지 생성 및 편집에 특화된 모델
-const textModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-const visionModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+// Gemini 클라이언트 초기화 (공식 문서 방식)
+const genAI = new GoogleGenAI({ 
+  apiKey: process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || ""
+});
 
 // 캐릭터 일관성을 위한 프롬프트 빌더
 export class PromptBuilder {

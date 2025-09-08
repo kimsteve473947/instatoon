@@ -1,9 +1,50 @@
+'use client'
+
+import { useState, useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ArrowRight, Sparkles, Zap, Shield, Star, Users, Check, Coins, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { AuthModal } from "@/components/auth/AuthModal";
+import { createBrowserClient } from '@supabase/ssr';
 
 export default function Home() {
+  const router = useRouter();
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null); // null = loading
+  
+  const supabase = createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
+
+  useEffect(() => {
+    // 초기 로그인 상태 체크
+    const checkUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      setIsLoggedIn(!!user);
+    };
+
+    checkUser();
+
+    // 로그인 상태 변화 감지
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      setIsLoggedIn(!!session?.user);
+    });
+
+    return () => subscription.unsubscribe();
+  }, [supabase]);
+
+  const handleStartClick = () => {
+    if (isLoggedIn) {
+      // 이미 로그인된 경우 바로 스튜디오로
+      router.push('/studio');
+    } else {
+      // 로그인 모달 띄우기
+      setIsAuthModalOpen(true);
+    }
+  };
   return (
     <div className="flex flex-col min-h-screen">
 
@@ -35,11 +76,20 @@ export default function Home() {
             </p>
             
             <div className="flex flex-col sm:flex-row gap-4 justify-center mb-8">
-              <Button size="lg" asChild className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-lg px-8 rounded-full">
-                <Link href="/studio">
-                  바로 시작하기
-                  <ArrowRight className="ml-2 h-5 w-5" />
-                </Link>
+              <Button 
+                size="lg" 
+                className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-lg px-8 rounded-full"
+                onClick={handleStartClick}
+                disabled={isLoggedIn === null} // 로딩 중일 때 비활성화
+              >
+                {isLoggedIn === null ? (
+                  "로딩 중..."
+                ) : isLoggedIn ? (
+                  "스튜디오 열기"
+                ) : (
+                  "바로 시작하기"
+                )}
+                <ArrowRight className="ml-2 h-5 w-5" />
               </Button>
               <Button size="lg" variant="outline" asChild className="text-lg px-8 rounded-full border-2 hover:bg-muted/50">
                 <Link href="/gallery">
@@ -185,7 +235,7 @@ export default function Home() {
       </section>
 
       {/* 가격 섹션 */}
-      <section className="py-20">
+      <section className="py-20" id="pricing">
         <div className="container mx-auto px-4">
           <h2 className="text-3xl font-bold text-center mb-4">
             합리적인 가격으로 시작하세요
@@ -195,7 +245,7 @@ export default function Home() {
           </p>
           
           <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">
-            <Card>
+            <Card className="cursor-pointer hover:shadow-lg transition-shadow" onClick={() => router.push('/pricing')}>
               <CardHeader>
                 <CardTitle>무료</CardTitle>
                 <CardDescription>취미로 시작하는 분들께</CardDescription>
@@ -216,13 +266,18 @@ export default function Home() {
                     <span className="text-sm">프로젝트 3개</span>
                   </li>
                 </ul>
-                <Button className="w-full mt-6 rounded-full" variant="outline" asChild>
-                  <Link href="/studio">무료 시작</Link>
+                <Button 
+                  className="w-full mt-6 rounded-full" 
+                  variant="outline" 
+                  onClick={handleStartClick}
+                  disabled={isLoggedIn === null}
+                >
+                  {isLoggedIn === null ? "로딩 중..." : isLoggedIn ? "스튜디오 열기" : "무료 시작"}
                 </Button>
               </CardContent>
             </Card>
             
-            <Card className="border-purple-500 relative">
+            <Card className="border-purple-500 relative cursor-pointer hover:shadow-lg transition-shadow" onClick={() => router.push('/pricing')}>
               <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-gradient-to-r from-purple-600 to-pink-600 text-white text-xs px-3 py-1 rounded-full">
                 인기
               </div>
@@ -252,7 +307,7 @@ export default function Home() {
               </CardContent>
             </Card>
             
-            <Card>
+            <Card className="cursor-pointer hover:shadow-lg transition-shadow" onClick={() => router.push('/pricing')}>
               <CardHeader>
                 <CardTitle>헤비유저</CardTitle>
                 <CardDescription>전문 창작자를 위한</CardDescription>
@@ -291,11 +346,15 @@ export default function Home() {
           <p className="text-xl text-white/90 mb-8">
             10개의 무료 토큰으로 첫 웹툰을 만들어보세요
           </p>
-          <Button size="lg" variant="secondary" asChild className="rounded-full px-8">
-            <Link href="/studio">
-              무료로 시작하기
-              <ArrowRight className="ml-2 h-5 w-5" />
-            </Link>
+          <Button 
+            size="lg" 
+            variant="secondary" 
+            className="rounded-full px-8"
+            onClick={handleStartClick}
+            disabled={isLoggedIn === null}
+          >
+            {isLoggedIn === null ? "로딩 중..." : isLoggedIn ? "스튜디오 열기" : "무료로 시작하기"}
+            <ArrowRight className="ml-2 h-5 w-5" />
           </Button>
         </div>
       </section>
@@ -318,6 +377,15 @@ export default function Home() {
           </div>
         </div>
       </footer>
+
+      {/* 로그인 모달 - 로그인 안된 사용자에게만 표시 */}
+      {!isLoggedIn && (
+        <AuthModal 
+          isOpen={isAuthModalOpen} 
+          onClose={() => setIsAuthModalOpen(false)}
+          redirectTo="/studio"
+        />
+      )}
     </div>
   );
 }

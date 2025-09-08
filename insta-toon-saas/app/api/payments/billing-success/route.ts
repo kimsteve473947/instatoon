@@ -62,7 +62,7 @@ export async function GET(req: NextRequest) {
 
     // 성공 페이지로 리다이렉트
     return NextResponse.redirect(
-      new URL("/dashboard/billing/success", req.nextUrl.origin)
+      new URL("/pricing/success", req.nextUrl.origin)
     );
   } catch (error) {
     console.error("Billing success error:", error);
@@ -73,7 +73,7 @@ export async function GET(req: NextRequest) {
       : "결제 처리 중 오류가 발생했습니다";
     
     return NextResponse.redirect(
-      new URL(`/dashboard/billing/error?message=${encodeURIComponent(errorMessage)}`, req.nextUrl.origin)
+      new URL(`/pricing/error?message=${encodeURIComponent(errorMessage)}`, req.nextUrl.origin)
     );
   }
 }

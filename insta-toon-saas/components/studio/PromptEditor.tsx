@@ -24,6 +24,7 @@ import {
   Smile,
   Sparkles
 } from "lucide-react";
+import { type CanvasRatio } from "@/types/editor";
 
 // 스타일 옵션
 const STYLE_OPTIONS = [
@@ -77,7 +78,11 @@ const PROMPT_TEMPLATES = [
   }
 ];
 
-export function PromptEditor() {
+interface PromptEditorProps {
+  canvasRatio: CanvasRatio;
+}
+
+export function PromptEditor({ canvasRatio }: PromptEditorProps) {
   const {
     panels,
     activePanel,
@@ -111,7 +116,16 @@ export function PromptEditor() {
   // 프롬프트 업데이트
   const handlePromptChange = (value: string) => {
     if (activePanel !== null) {
-      updatePanelPrompt(activePanel, value);
+      // 캔버스 비율 정보를 프롬프트에 추가
+      const aspectRatioInfo = canvasRatio === '4:5' 
+        ? 'vertical format, 4:5 aspect ratio, Instagram portrait style' 
+        : 'square format, 1:1 aspect ratio, Instagram square style';
+      
+      const enhancedValue = value.includes('[ASPECT]') 
+        ? value.replace('[ASPECT]', aspectRatioInfo)
+        : value;
+      
+      updatePanelPrompt(activePanel, enhancedValue);
       
       // 캐릭터 이름 감지 및 자동완성 제안
       detectCharacterMentions(value);
@@ -264,12 +278,18 @@ export function PromptEditor() {
             {/* 프롬프트 입력 */}
             <div className="flex-1 flex flex-col">
               <Label htmlFor="prompt" className="mb-2">프롬프트</Label>
+              <div className="mb-2 p-2 bg-yellow-50 border border-yellow-200 rounded-md">
+                <p className="text-xs text-yellow-800">
+                  ⚠️ <strong>중요:</strong> 프롬프트에 대사나 텍스트를 넣지 마세요. 
+                  AI는 이미지만 생성합니다. 대사는 생성 후 말풍선으로 추가하세요.
+                </p>
+              </div>
               <Textarea
                 ref={textareaRef}
                 id="prompt"
                 value={currentPrompt}
                 onChange={(e) => handlePromptChange(e.target.value)}
-                placeholder="생성하고 싶은 장면을 자세히 설명해주세요..."
+                placeholder="캐릭터와 배경만 설명하세요. 예: '학교 교실에서 창밖을 바라보는 여학생'"
                 className="flex-1 min-h-[120px] resize-none"
               />
               

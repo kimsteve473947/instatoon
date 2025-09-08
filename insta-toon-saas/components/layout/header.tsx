@@ -97,7 +97,7 @@ export function Header() {
   }
 
   // 특정 페이지에서는 헤더를 숨김
-  const hideHeader = ['/sign-in', '/sign-up'].includes(pathname)
+  const hideHeader = ['/sign-in', '/sign-up', '/studio'].includes(pathname)
   if (hideHeader) return null
 
   return (
@@ -121,39 +121,29 @@ export function Header() {
               </DropdownMenuTrigger>
               <DropdownMenuContent>
                 <DropdownMenuItem asChild>
-                  <Link href="/gallery?category=romance">로맨스 웹툰</Link>
+                  <Link href="/gallery?category=romance">💕 로맨스 웹툰</Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
-                  <Link href="/gallery?category=action">액션 웹툰</Link>
+                  <Link href="/gallery?category=fantasy">🔮 판타지 웹툰</Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
-                  <Link href="/gallery?category=daily">일상 웹툰</Link>
+                  <Link href="/gallery?category=action">⚔️ 액션 웹툰</Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
-                  <Link href="/gallery?category=comedy">코미디 웹툰</Link>
+                  <Link href="/gallery?category=comedy">😂 코미디 웹툰</Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href="/gallery?category=drama">🎭 드라마 웹툰</Link>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="text-sm font-medium hover:text-primary transition-colors">
-                  추천 기능
-                  <ChevronDown className="ml-1 h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent>
-                <DropdownMenuItem asChild>
-                  <Link href="/studio">AI 웹툰 제작</Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link href="/characters">캐릭터 관리</Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link href="/templates">템플릿 커스터마이징</Link>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+
+            <Link 
+              href="/gallery" 
+              className="text-sm font-medium hover:text-primary transition-colors"
+            >
+              갤러리
+            </Link>
 
             <Link 
               href="/pricing" 
@@ -163,34 +153,11 @@ export function Header() {
             </Link>
             
             <Link 
-              href="/gallery" 
+              href="/pricing" 
               className="text-sm font-medium hover:text-primary transition-colors"
             >
-              갤러리
+              대시보드
             </Link>
-            
-            <Link 
-              href="/guide" 
-              className="text-sm font-medium hover:text-primary transition-colors"
-            >
-              사용법
-            </Link>
-            
-            <Link 
-              href="/support" 
-              className="text-sm font-medium hover:text-primary transition-colors"
-            >
-              문의하기
-            </Link>
-
-            {user && (
-              <Link 
-                href="/dashboard" 
-                className="text-sm font-medium hover:text-primary transition-colors"
-              >
-                대시보드
-              </Link>
-            )}
           </nav>
         </div>
 
@@ -232,7 +199,7 @@ export function Header() {
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem asChild>
-                  <Link href="/dashboard" className="cursor-pointer">
+                  <Link href="/pricing" className="cursor-pointer">
                     <LayoutDashboard className="mr-2 h-4 w-4" />
                     <span>대시보드</span>
                   </Link>
@@ -244,7 +211,7 @@ export function Header() {
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
-                  <Link href="/dashboard/projects" className="cursor-pointer">
+                  <Link href="/projects" className="cursor-pointer">
                     <FolderOpen className="mr-2 h-4 w-4" />
                     <span>내 프로젝트</span>
                   </Link>
@@ -257,7 +224,7 @@ export function Header() {
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
-                  <Link href="/dashboard/billing" className="cursor-pointer">
+                  <Link href="/pricing" className="cursor-pointer">
                     <CreditCard className="mr-2 h-4 w-4" />
                     <span>결제 관리</span>
                   </Link>

@@ -7,6 +7,7 @@ export async function GET(request: NextRequest) {
   const code = requestUrl.searchParams.get('code')
   const error = requestUrl.searchParams.get('error')
   const errorDescription = requestUrl.searchParams.get('error_description')
+  const redirectTo = requestUrl.searchParams.get('redirectTo')
   const origin = requestUrl.origin
 
   // OAuth 제공자에서 에러가 반환된 경우
@@ -21,8 +22,9 @@ export async function GET(request: NextRequest) {
       const { error: sessionError } = await supabase.auth.exchangeCodeForSession(code)
       
       if (!sessionError) {
-        // 로그인 성공 - 대시보드로 리다이렉트
-        return NextResponse.redirect(`${origin}/dashboard`)
+        // 로그인 성공 - redirectTo 파라미터가 있으면 그곳으로, 없으면 메인 페이지로
+        const finalRedirect = redirectTo || '/'
+        return NextResponse.redirect(`${origin}${finalRedirect}`)
       } else {
         console.error('Session exchange error:', sessionError)
         return NextResponse.redirect(`${origin}/sign-in?error=session_error`)

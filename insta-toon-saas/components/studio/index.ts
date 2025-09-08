@@ -1,12 +1,24 @@
-// Studio Components Export
-export { StudioLayout } from './StudioLayout';
+export { WebtoonStudio as StudioLayout } from './WebtoonStudio';
 export { Sidebar } from './Sidebar';
-export { WebtoonCanvas } from './WebtoonCanvas';
-export { PromptEditor } from './PromptEditor';
-export { PanelContainer } from './PanelContainer';
 export { Toolbar } from './Toolbar';
 export { StatusBar } from './StatusBar';
+export { WebtoonCanvas } from './WebtoonCanvas';
+export { PromptEditor } from './PromptEditor';
+export { CharacterManager } from './CharacterManager';
 export { CharacterCreator } from './CharacterCreator';
-
-// Re-export types from store
-export type { Panel, Character, Project } from '@/lib/stores/studio-store';
+export { PanelContainer } from './PanelContainer';
+export { NewMiriCanvasStudio } from './NewMiriCanvasStudio';
+export { MiriCanvasSidebar } from './MiriCanvasSidebar';
+export { NewMiriCanvasStudioDynamic } from './NewMiriCanvasStudioDynamic';
+export { MiriCanvasStudioAdvanced } from './MiriCanvasStudioAdvanced';
+export { MiriCanvasSidebarAdvanced } from './MiriCanvasSidebarAdvanced';
+export { MiriCanvasStudioAdvancedDynamic } from './MiriCanvasStudioAdvancedDynamic';
+export { MiriCanvasStudioPro } from './MiriCanvasStudioPro';
+export { MiriCanvasSidebarPro } from './MiriCanvasSidebarPro';
+export { MiriCanvasStudioProDynamic } from './MiriCanvasStudioProDynamic';
+export { MiriCanvasStudioSimple } from './MiriCanvasStudioSimple';
+export { WebToonMakerStudio } from './WebToonMakerStudio';
+export { WebToonMakerStudioFixed } from './WebToonMakerStudioFixed';
+export { MiriCanvasStudioPerfect } from './MiriCanvasStudioPerfect';
+export { MiriCanvasStudioFinal } from './MiriCanvasStudioFinal';
+export { MiriCanvasStudioUltimate } from './MiriCanvasStudioUltimate';

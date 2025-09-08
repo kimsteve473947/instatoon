@@ -1,168 +1,184 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with the Insta-Toon SaaS platform.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
 
-인스타툰 제작 SaaS 플랫폼 - 한국 시장을 타겟으로 한 웹툰 제작 도구
-- AI 기반 캐릭터 일관성 유지 기능
-- 토큰 기반 구독 시스템
-- Gemini Flash 2.0을 활용한 이미지 생성
+인스타툰 (InstaToon) - AI 기반 인스타그램 웹툰 제작 SaaS 플랫폼
+- 한국 시장 특화 (Toss Payments 통합)
+- Google Gemini 2.5 Flash를 활용한 이미지 생성
+- 캐릭터 일관성 유지 시스템
+- 토큰 기반 구독 모델
+
+## Commands
+
+### Development
+```bash
+npm run dev              # Start development server (http://localhost:3000)
+npm run build           # Build for production  
+npm run start           # Start production server
+npm run lint            # Run ESLint
+```
+
+### Database (Prisma)
+```bash
+npx prisma generate     # Generate Prisma client
+npx prisma migrate dev  # Run migrations in development
+npx prisma studio       # Open Prisma Studio (DB GUI)
+npx prisma db push      # Push schema changes without migration
+```
+
+### Testing & Debugging
+```bash
+npx tsc --noEmit        # Check TypeScript types
+rm -rf .next            # Clear Next.js cache
+```
 
 ## Tech Stack
 
-- **Framework**: Next.js 14 (App Router)
-- **Language**: TypeScript
-- **Styling**: Tailwind CSS
-- **Database**: Supabase (PostgreSQL)
-- **Authentication**: NextAuth.js with Supabase adapter
-- **Payment**: Stripe
-- **AI API**: Google Gemini Flash 2.0
-- **State Management**: Zustand
-- **UI Components**: Radix UI + Custom components
-- **Form Handling**: React Hook Form + Zod
+- **Framework**: Next.js 15.5.2 (App Router)
+- **Language**: TypeScript (strict mode)
+- **Styling**: Tailwind CSS v4 + Shadcn/ui
+- **Database**: Supabase (PostgreSQL) + Prisma ORM  
+- **AI**: Google Gemini 2.5 Flash (gemini-2-5-flash-image-preview)
+- **Storage**: Vercel Blob
+- **Payments**: Toss Payments (Korean payment system)
+- **Auth**: Supabase Auth (Clerk temporarily disabled)
+- **State**: Zustand
 
-## Project Structure
+## Architecture
 
+### Project Structure
 ```
-insta-toon-saas/
-├── app/                    # Next.js App Router
-│   ├── api/               # API Routes
-│   │   ├── auth/         # Authentication endpoints
-│   │   ├── generation/   # AI generation endpoints
-│   │   ├── payment/      # Stripe payment endpoints
-│   │   └── subscription/ # Subscription management
-│   ├── auth/             # Authentication pages
-│   ├── dashboard/        # User dashboard
-│   ├── editor/          # Webtoon editor
-│   ├── gallery/         # Public gallery
-│   └── pricing/         # Pricing page
-├── components/           # React components
-│   ├── ui/              # Reusable UI components
-│   ├── auth/           # Auth-related components
-│   ├── editor/         # Editor components
-│   ├── gallery/        # Gallery components
-│   └── layout/         # Layout components
-├── hooks/               # Custom React hooks
-├── lib/                # Library configurations
-│   ├── supabase.ts    # Supabase client
-│   ├── stripe.ts      # Stripe configuration
-│   └── gemini.ts      # Gemini API client
-├── types/              # TypeScript type definitions
-└── utils/              # Utility functions
+/app                    # Next.js App Router
+  /api                 # API routes
+    /ai/generate       # AI image generation endpoint
+    /payments          # Toss Payments webhooks
+    /gallery           # Gallery API endpoints
+  /studio              # Main webtoon editor (MiriCanvasStudioUltimate)
+  /dashboard           # User dashboard
+  /projects            # Project management
+  /pricing             # Subscription plans
 
+/components
+  /studio              # Editor components (optimized with memoization)
+    MiriCanvasStudioUltimate.tsx  # Main studio component
+    BubbleTemplates.tsx           # Speech bubble SVG templates (12 templates)
+    VirtualizedTemplateList.tsx   # Performance-optimized template list
+    OptimizedImage.tsx            # Image loading optimization
+    LazyBubbleTemplateRenderer.tsx # Lazy loading for SVG templates
+  /ui                  # Shadcn/ui base components
+
+/lib
+  /ai                  # AI service integration
+    nano-banana-service.ts  # Main AI service
+  /db                  # Database utilities
+  /payments            # Payment processing
+  /supabase            # Supabase client setup
+  /utils               # Utility functions
+    imageOptimizer.ts  # Image compression utilities
+
+/hooks                 # Custom React hooks
+  useDebounce.ts      # Debouncing for performance
+  useBatchStateUpdater.ts  # Batch state updates
+
+/prisma
+  schema.prisma       # Database schema
 ```
 
-## Core Features
+### Key Components
 
-### 1. Character Consistency System
-- 캐릭터 프로필 저장 및 관리
-- AI 프롬프트 최적화를 통한 일관성 유지
-- 캐릭터별 스타일 가이드라인
+#### Studio System (MiriCanvasStudioUltimate)
+- Main webtoon creation interface at `/studio`
+- Multi-panel canvas with drag-and-drop
+- Speech bubble system with 12 dynamic SVG templates
+- Character reference management (up to 5 characters)
+- Real-time AI image generation with Google Gemini
+- Performance optimized with React.memo, useMemo, useCallback
+- Virtualized lists and lazy loading for large datasets
 
-### 2. Token-Based Subscription
-- 월간 토큰 충전 시스템
-- 사용량 기반 과금
-- 다양한 구독 플랜
+#### AI Integration
+- **Endpoint**: `/api/ai/generate`
+- Uses Google Gemini 2.5 Flash for image generation
+- Character consistency through reference system
+- Token-based usage tracking
+- Development mode saves to localStorage for testing
 
-### 3. Webtoon Editor
-- 컷 단위 편집
-- 말풍선 및 텍스트 추가
-- 효과음 및 배경 처리
+#### Payment & Subscription
+- **Plans**: FREE, PERSONAL (₩30,000), HEAVY (₩100,000), ENTERPRISE (₩200,000)
+- Token-based usage system
+- Toss Payments integration for Korean market
+- Webhooks: `/api/payments/billing-success`, `/billing-fail`, `/billing-register`
 
-### 4. AI Generation
-- Gemini Flash 2.0 API 통합
-- 프롬프트 템플릿 시스템
-- 이미지 생성 및 편집
+#### Database Models (Prisma)
+- **User**: Linked to Supabase Auth (supabaseId)
+- **Subscription**: Plan management and token tracking
+- **Project**: Webtoon projects with workspace settings
+- **Character**: Reference images for consistency
+- **Generation**: AI generation history
+- **Transaction**: Payment records
 
-## Database Schema
-
-### Users
-- id, email, name, created_at, subscription_tier
-
-### Characters
-- id, user_id, name, description, style_guide, reference_images
-
-### Projects
-- id, user_id, title, description, status, created_at
-
-### Generations
-- id, project_id, character_id, prompt, image_url, tokens_used
-
-### Subscriptions
-- id, user_id, stripe_customer_id, stripe_subscription_id, tokens_remaining
-
-## API Endpoints
-
-- `/api/auth/*` - NextAuth.js authentication
-- `/api/generation/create` - Generate new image
-- `/api/generation/edit` - Edit existing image
-- `/api/payment/checkout` - Create Stripe checkout session
-- `/api/subscription/usage` - Get token usage
-
-## Environment Variables
-
+Required in `.env.local`:
 ```env
-# Database
-DATABASE_URL=
-DIRECT_URL=
-
-# Authentication
-NEXTAUTH_URL=
-NEXTAUTH_SECRET=
+# Google AI
+GOOGLE_AI_API_KEY=
 
 # Supabase
+DATABASE_URL=postgresql://...
+DIRECT_URL=postgresql://...  
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 
-# Stripe
-STRIPE_SECRET_KEY=
-STRIPE_PUBLISHABLE_KEY=
-STRIPE_WEBHOOK_SECRET=
+# Vercel Blob Storage
+VERCEL_BLOB_READ_WRITE_TOKEN=
 
-# Gemini API
-GEMINI_API_KEY=
+# Toss Payments
+NEXT_PUBLIC_TOSS_CLIENT_KEY=
+TOSS_SECRET_KEY=
 
-# Storage
-NEXT_PUBLIC_STORAGE_URL=
+# App URL
+NEXT_PUBLIC_APP_URL=http://localhost:3000
 ```
 
-## Development Commands
+## Performance Optimizations
 
-```bash
-# Install dependencies
-npm install
+Recent optimizations implemented:
+1. **React Memoization**: Components wrapped with `React.memo()`
+2. **useCallback/useMemo**: Event handlers and computed values optimized
+3. **Lazy Loading**: SVG templates load on-demand with Intersection Observer
+4. **Image Optimization**: WebP format with compression
+5. **Batch State Updates**: Debounced updates with 50ms delay
+6. **Virtualized Lists**: Template lists render only visible items
 
-# Run development server
-npm run dev
+## Development Mode Features
 
-# Build for production
-npm run build
+- Mock user ID for testing without auth
+- Local storage for generated images  
+- Skip character reference manager in development
+- Console logging for debugging
 
-# Start production server
-npm start
+## Common Issues & Solutions
 
-# Run linting
-npm run lint
+#### Database Connection
+If Prisma can't connect to Supabase:
+1. Check DATABASE_URL in `.env.local`
+2. Ensure Supabase project is active
+3. Run `npx prisma generate` after schema changes
 
-# Type checking
-npm run type-check
-```
+#### AI Generation Errors
+- Check GOOGLE_AI_API_KEY is valid
+- Verify token balance for user
+- In dev mode, check localStorage for cached images
 
-## Coding Standards
+#### Build Errors
+- Clear `.next` directory: `rm -rf .next`
+- Regenerate Prisma client: `npx prisma generate`
+- Check TypeScript errors: `npx tsc --noEmit`
 
-- Use TypeScript strict mode
-- Follow ESLint configuration
-- Use Prettier for formatting
-- Component files: PascalCase
-- Utility files: camelCase
-- API routes: kebab-case
+## Korean Market Considerations
 
-## Important Notes
-
-- Always maintain character consistency in generated images
-- Optimize token usage for cost efficiency
-- Ensure Korean language support throughout UI
-- Follow accessibility best practices
-- Implement proper error handling and loading states
+- UI text in Korean (한국어)
+- Toss Payments for local payment processing
+- KRW (₩) currency throughout
+- Instagram-optimized aspect ratios (4:5, 1:1)

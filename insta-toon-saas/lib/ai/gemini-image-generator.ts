@@ -1,18 +1,8 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 
-// Gemini 2.5 Flash 이미지 생성 클라이언트
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY!);
-
-// Gemini 2.5 Flash 모델 설정
-// gemini-2.0-flash-exp 또는 gemini-2.5-flash 사용
-const imageModel = genAI.getGenerativeModel({ 
-  model: "gemini-2.0-flash-exp",
-  generationConfig: {
-    temperature: 0.9,
-    topK: 40,
-    topP: 0.95,
-    maxOutputTokens: 8192,
-  },
+// Gemini 2.5 Flash Image 생성 클라이언트 (공식 문서 방식)
+const genAI = new GoogleGenAI({ 
+  apiKey: process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || ""
 });
 
 // 웹툰 전용 프롬프트 템플릿
@@ -273,15 +263,10 @@ Optimized prompt (be specific about visual elements, composition, and mood):
         characters,
       });
       
-      // 4. Gemini API 호출하여 이미지 생성
-      // 참고: Gemini 2.5 Flash는 이미지 생성을 직접 지원
-      const result = await imageModel.generateContent({
-        contents: [{
-          role: "user",
-          parts: [{
-            text: `Generate image: ${finalPrompt}`
-          }]
-        }]
+      // 4. Gemini 2.5 Flash Image API 호출 (공식 문서 방식)
+      const result = await genAI.models.generateContent({
+        model: "gemini-2.5-flash-image-preview",
+        contents: `Generate image: ${finalPrompt}`
       });
       
       const response = result.response;
@@ -306,7 +291,7 @@ Optimized prompt (be specific about visual elements, composition, and mood):
           characterCount: characters.length,
           panelNumber: options.panelNumber,
           timestamp: new Date().toISOString(),
-          model: "gemini-2.0-flash-exp",
+          model: "gemini-2.5-flash-image-preview",
         },
       };
     } catch (error) {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { prisma } from "@/lib/db/prisma";
 
 // 캐릭터 등록
 export async function POST(request: NextRequest) {
@@ -37,28 +38,50 @@ export async function POST(request: NextRequest) {
     const autoAliases = generateAliases(name);
     const allAliases = [...new Set([...aliases, ...autoAliases])];
 
-    // 캐릭터 등록 (Supabase 직접 연결)
-    const { data: character, error } = await supabase
-      .from('characters')
-      .insert({
-        user_id: user.id,
+    // 사용자 정보 조회
+    const userData = await prisma.user.findUnique({
+      where: { supabaseId: user.id }
+    });
+
+    if (!userData) {
+      return NextResponse.json(
+        { success: false, error: "사용자 정보를 찾을 수 없습니다" },
+        { status: 404 }
+      );
+    }
+
+    // 구독 정보 확인 (캐릭터 개수 제한)
+    const subscription = await prisma.subscription.findUnique({
+      where: { userId: userData.id }
+    });
+
+    const currentCharacterCount = await prisma.character.count({
+      where: { userId: userData.id }
+    });
+
+    const maxCharacters = subscription?.maxCharacters || 1;
+    if (currentCharacterCount >= maxCharacters) {
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: `캐릭터 생성 한도를 초과했습니다 (${currentCharacterCount}/${maxCharacters})`,
+          needsUpgrade: true
+        },
+        { status: 402 }
+      );
+    }
+
+    // 캐릭터 등록 (Prisma 사용)
+    const character = await prisma.character.create({
+      data: {
+        userId: userData.id,
         name,
         description,
-        metadata: {
-          aliases: allAliases,
-          visualFeatures: visualFeatures || extractVisualFeatures(description),
-          clothing: clothing || { default: "", variations: [] },
-          personality: personality || "",
-        },
-        reference_images: referenceImages,
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error("Supabase insert error:", error);
-      throw error;
-    }
+        styleGuide: personality || "",
+        referenceImages: referenceImages || [],
+        thumbnailUrl: referenceImages && referenceImages.length > 0 ? referenceImages[0] : null,
+      }
+    });
 
     return NextResponse.json({
       success: true,
@@ -100,29 +123,34 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // 모든 캐릭터 조회 (Supabase 직접 연결)
-    const { data: characters, error } = await supabase
-      .from('characters')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('updated_at', { ascending: false });
+    // 사용자 정보 조회
+    const userData = await prisma.user.findUnique({
+      where: { supabaseId: user.id }
+    });
 
-    if (error) {
-      console.error("Supabase select error:", error);
-      throw error;
+    if (!userData) {
+      return NextResponse.json(
+        { success: false, error: "사용자 정보를 찾을 수 없습니다" },
+        { status: 404 }
+      );
     }
+
+    // 모든 캐릭터 조회 (Prisma 사용)
+    const characters = await prisma.character.findMany({
+      where: { userId: userData.id },
+      orderBy: { updatedAt: 'desc' }
+    });
 
     const formattedCharacters = characters.map(char => ({
       id: char.id,
       name: char.name,
       description: char.description,
-      aliases: char.metadata?.aliases || [],
-      visualFeatures: char.metadata?.visualFeatures || {},
-      clothing: char.metadata?.clothing || {},
-      personality: char.metadata?.personality || "",
-      referenceImages: char.reference_images || [],
-      createdAt: char.created_at,
-      updatedAt: char.updated_at,
+      styleGuide: char.styleGuide,
+      referenceImages: char.referenceImages as string[],
+      thumbnailUrl: char.thumbnailUrl,
+      isFavorite: char.isFavorite,
+      createdAt: char.createdAt,
+      updatedAt: char.updatedAt,
     }));
 
     return NextResponse.json({
@@ -162,21 +190,42 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    // 캐릭터 업데이트 (Supabase 직접 연결)
-    const { error } = await supabase
-      .from('characters')
-      .update({
-        name: updates.name,
-        description: updates.description,
-        metadata: updates.metadata,
-        reference_images: updates.referenceImages,
-      })
-      .eq('id', characterId)
-      .eq('user_id', user.id);
+    // 사용자 정보 조회
+    const userData = await prisma.user.findUnique({
+      where: { supabaseId: user.id }
+    });
 
-    if (error) {
-      console.error("Supabase update error:", error);
-      throw error;
+    if (!userData) {
+      return NextResponse.json(
+        { success: false, error: "사용자 정보를 찾을 수 없습니다" },
+        { status: 404 }
+      );
+    }
+
+    // 캐릭터 업데이트 (Prisma 사용)
+    const updatedCount = await prisma.character.updateMany({
+      where: { 
+        id: characterId,
+        userId: userData.id 
+      },
+      data: {
+        ...(updates.name && { name: updates.name }),
+        ...(updates.description !== undefined && { description: updates.description }),
+        ...(updates.styleGuide !== undefined && { styleGuide: updates.styleGuide }),
+        ...(updates.referenceImages && { 
+          referenceImages: updates.referenceImages,
+          thumbnailUrl: updates.referenceImages.length > 0 ? updates.referenceImages[0] : null
+        }),
+        ...(updates.isFavorite !== undefined && { isFavorite: updates.isFavorite }),
+        updatedAt: new Date(),
+      }
+    });
+
+    if (updatedCount.count === 0) {
+      return NextResponse.json(
+        { success: false, error: "캐릭터를 찾을 수 없거나 권한이 없습니다" },
+        { status: 404 }
+      );
     }
 
     return NextResponse.json({
@@ -216,16 +265,31 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    // 캐릭터 삭제 (Supabase 직접 연결)
-    const { error } = await supabase
-      .from('characters')
-      .delete()
-      .eq('id', characterId)
-      .eq('user_id', user.id);
+    // 사용자 정보 조회
+    const userData = await prisma.user.findUnique({
+      where: { supabaseId: user.id }
+    });
 
-    if (error) {
-      console.error("Supabase delete error:", error);
-      throw error;
+    if (!userData) {
+      return NextResponse.json(
+        { success: false, error: "사용자 정보를 찾을 수 없습니다" },
+        { status: 404 }
+      );
+    }
+
+    // 캐릭터 삭제 (Prisma 사용)
+    const deletedCount = await prisma.character.deleteMany({
+      where: { 
+        id: characterId,
+        userId: userData.id 
+      }
+    });
+
+    if (deletedCount.count === 0) {
+      return NextResponse.json(
+        { success: false, error: "캐릭터를 찾을 수 없거나 권한이 없습니다" },
+        { status: 404 }
+      );
     }
 
     return NextResponse.json({
@@ -275,52 +339,3 @@ function generateAliases(name: string): string[] {
   return aliases;
 }
 
-// 설명에서 시각적 특징 추출
-function extractVisualFeatures(description: string): any {
-  const features: any = {
-    hairColor: "",
-    hairStyle: "",
-    eyeColor: "",
-    faceShape: "",
-    bodyType: "",
-    height: "",
-    age: "",
-    gender: "",
-    skinTone: "",
-    distinctiveFeatures: [],
-  };
-
-  // 머리 색상 패턴
-  const hairColorPattern = /(검은|갈색|금발|빨간|파란|녹색|보라|회색|흰|검정)\s*머리/;
-  const hairColorMatch = description.match(hairColorPattern);
-  if (hairColorMatch) features.hairColor = hairColorMatch[1];
-
-  // 머리 스타일 패턴
-  const hairStylePattern = /(단발|장발|롱|숏|웨이브|곱슬|직모|포니테일|양갈래)/;
-  const hairStyleMatch = description.match(hairStylePattern);
-  if (hairStyleMatch) features.hairStyle = hairStyleMatch[1];
-
-  // 눈 색상 패턴
-  const eyeColorPattern = /(검은|갈색|파란|녹색|회색|빨간)\s*눈/;
-  const eyeColorMatch = description.match(eyeColorPattern);
-  if (eyeColorMatch) features.eyeColor = eyeColorMatch[1];
-
-  // 나이 패턴
-  const agePattern = /(\d+)살|(\d+)대/;
-  const ageMatch = description.match(agePattern);
-  if (ageMatch) features.age = ageMatch[1] || ageMatch[2] + "대";
-
-  // 성별 패턴
-  if (description.includes("남자") || description.includes("남성")) {
-    features.gender = "남성";
-  } else if (description.includes("여자") || description.includes("여성")) {
-    features.gender = "여성";
-  }
-
-  // 키 패턴
-  const heightPattern = /(큰|작은|보통)\s*키|([\d]+)cm/;
-  const heightMatch = description.match(heightPattern);
-  if (heightMatch) features.height = heightMatch[0];
-
-  return features;
-}
