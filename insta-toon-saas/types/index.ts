@@ -14,9 +14,8 @@ export interface User {
 // 구독 관련 타입
 export enum SubscriptionPlan {
   FREE = "FREE",
-  PERSONAL = "PERSONAL",
-  HEAVY = "HEAVY",
-  ENTERPRISE = "ENTERPRISE",
+  PRO = "PRO",
+  PREMIUM = "PREMIUM",
 }
 
 export interface Subscription {

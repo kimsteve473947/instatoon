@@ -21,35 +21,35 @@ const PLATFORM_PRICING = {
 
 // 구독 플랜 설정 (2.5배 마진 기준)
 const SUBSCRIPTION_CONFIG = {
-  PERSONAL: {
-    name: '개인',
+  FREE: {
+    name: '무료',
+    price: 0,                          // 무료
+    platformTokens: 10,                // 10 토큰 제공
+    maxImages: 10,                     // 월 이미지 생성 한도
+    dailyLimit: 3,                     // 일일 생성 한도
+    maxCharacters: 1,
+    estimatedCost: 520,                // 예상 원가 (10 × 52원)
+    profit: -520,                      // 무료 플랜
+  },
+  PRO: {
+    name: '프로',
     price: 30000,                      // 월 3만원
-    platformTokens: 230,                // 230이미지 생성 가능
-    maxImages: 230,                     // 월 이미지 생성 한도
-    dailyLimit: 15,                     // 일일 생성 한도
+    platformTokens: 500000,            // 50만 토큰 제공
+    maxImages: 500000,                 // 월 이미지 생성 한도
+    dailyLimit: 20000,                 // 일일 생성 한도 (충분히 큰 값)
     maxCharacters: 3,
-    estimatedCost: 11960,               // 예상 원가 (230 × 52원)
-    profit: 18040,                     // 예상 수익 (60% 마진)
+    estimatedCost: 26000000,           // 예상 원가 (500000 × 52원) - 실제로는 이렇게 많이 쓰지 않을 것
+    profit: -25970000,                 // 토큰 기반 계산이므로 실제 사용량에 따라 달라짐
   },
-  HEAVY: {
-    name: '헤비유저',
+  PREMIUM: {
+    name: '프리미엄',
     price: 100000,                     // 월 10만원
-    platformTokens: 770,                // 770이미지 생성 가능
-    maxImages: 770,                     // 월 이미지 생성 한도
-    dailyLimit: 50,                     // 일일 생성 한도
+    platformTokens: 2000000,           // 200만 토큰 제공
+    maxImages: 2000000,                // 월 이미지 생성 한도
+    dailyLimit: 80000,                 // 일일 생성 한도 (충분히 큰 값)
     maxCharacters: 5,
-    estimatedCost: 40040,               // 예상 원가 (770 × 52원)
-    profit: 59960,                     // 예상 수익 (60% 마진)
-  },
-  ENTERPRISE: {
-    name: '기업',
-    price: 200000,                     // 월 20만원
-    platformTokens: 1540,               // 1540이미지 생성 가능
-    maxImages: 1540,                    // 월 이미지 생성 한도
-    dailyLimit: 100,                    // 일일 생성 한도
-    maxCharacters: -1,                  // 무제한
-    estimatedCost: 80080,               // 예상 원가 (1540 × 52원)
-    profit: 119920,                    // 예상 수익 (60% 마진)
+    estimatedCost: 104000000,          // 예상 원가 (2000000 × 52원) - 실제로는 이렇게 많이 쓰지 않을 것
+    profit: -103900000,                // 토큰 기반 계산이므로 실제 사용량에 따라 달라짐
   },
 } as const;
 

@@ -203,54 +203,28 @@ export const useStudioStore = create<StudioState & StudioActions>()(
         });
         
         try {
-          // 개발 모드에서는 로컬 스토리지에 저장
-          if (process.env.NODE_ENV === 'development') {
-            const projectData = {
-              id: currentProject.id || `project-${Date.now()}`,
-              title: currentProject.name,
-              panels: panels,
-              createdAt: currentProject.createdAt || new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-              panelCount: panels.length,
-              status: 'draft' as const,
-            };
-            
-            // 로컬 스토리지에서 기존 프로젝트 로드
-            const savedProjects = localStorage.getItem('instatoon_projects');
-            let projects = savedProjects ? JSON.parse(savedProjects) : [];
-            
-            // 기존 프로젝트 업데이트 또는 새 프로젝트 추가
-            const existingIndex = projects.findIndex((p: any) => p.id === projectData.id);
-            if (existingIndex >= 0) {
-              projects[existingIndex] = projectData;
-            } else {
-              projects.unshift(projectData);
-            }
-            
-            // 저장
-            localStorage.setItem('instatoon_projects', JSON.stringify(projects.slice(0, 50)));
-            console.log('Project saved to local storage');
-            
-            set((state) => ({
-              currentProject: state.currentProject ? {
-                ...state.currentProject,
-                id: projectData.id,
-                updatedAt: new Date(),
-                isAutoSaving: false,
-              } : null
-            }));
-            
-            return;
-          }
+          // 모든 환경에서 Supabase API 호출
+          const isNewProject = currentProject.id.startsWith('project-') && currentProject.id.includes(Date.now().toString().substring(0, 8));
           
-          // 프로덕션 모드: API 호출
           const response = await fetch('/api/studio/save-project', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              projectId: currentProject.id === `project-${Date.now()}` ? null : currentProject.id,
+              projectId: isNewProject ? null : currentProject.id,
               projectName: currentProject.name,
-              panels: panels,
+              panels: panels.map(panel => ({
+                prompt: panel.prompt,
+                imageUrl: panel.imageUrl,
+                content: panel.prompt,
+                settings: {},
+                metadata: {
+                  style: panel.style,
+                  emotion: panel.emotion,
+                  characters: panel.characters,
+                  generatedAt: panel.generatedAt,
+                  tokensUsed: panel.tokensUsed,
+                }
+              })),
             }),
           });
 

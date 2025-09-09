@@ -149,7 +149,7 @@ export function Header() {
               href="/pricing" 
               className="text-sm font-medium hover:text-primary transition-colors"
             >
-              가격안내
+              멤버쉽
             </Link>
             
             <Link 
@@ -207,13 +207,13 @@ export function Header() {
                 <DropdownMenuItem asChild>
                   <Link href="/studio" className="cursor-pointer">
                     <Sparkles className="mr-2 h-4 w-4" />
-                    <span>스튜디오</span>
+                    <span>제작 스튜디오</span>
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
                   <Link href="/projects" className="cursor-pointer">
                     <FolderOpen className="mr-2 h-4 w-4" />
-                    <span>내 프로젝트</span>
+                    <span>작업내역</span>
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />

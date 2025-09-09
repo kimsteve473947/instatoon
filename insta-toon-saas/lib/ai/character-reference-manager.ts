@@ -297,6 +297,70 @@ ${enhancedPrompt}
   }
   
   /**
+   * 선택된 캐릭터 ID들로 프롬프트 향상
+   */
+  async enhancePromptWithSelectedCharacters(
+    userId: string,
+    originalPrompt: string,
+    selectedCharacterIds: string[]
+  ): Promise<{
+    enhancedPrompt: string;
+    detectedCharacters: CharacterReference[];
+    characterDescriptions: string;
+    referenceImages: string[];
+  }> {
+    // 사용자의 캐릭터 로드
+    await this.loadUserCharacters(userId);
+    
+    // 선택된 캐릭터들 가져오기
+    const selectedCharacters: CharacterReference[] = [];
+    for (const characterId of selectedCharacterIds) {
+      const character = this.characterCache.get(characterId);
+      if (character) {
+        selectedCharacters.push(character);
+      }
+    }
+    
+    console.log(`🎯 선택된 캐릭터 로딩 완료: ${selectedCharacters.length}/${selectedCharacterIds.length}개`);
+    
+    // 캐릭터 설명 생성
+    let characterDescriptions = "";
+    const referenceImages: string[] = [];
+    
+    selectedCharacters.forEach(character => {
+      characterDescriptions += this.buildCharacterDescriptionForAI(character) + "\n\n";
+      
+      // 레퍼런스 이미지 추가 (최대 3개)
+      referenceImages.push(...character.referenceImages.slice(0, 3));
+    });
+    
+    // 향상된 프롬프트 생성
+    let enhancedPrompt = originalPrompt;
+    
+    // 선택된 캐릭터가 있다면 명확한 지시 추가
+    if (selectedCharacters.length > 0) {
+      enhancedPrompt = `
+${originalPrompt}
+
+[선택된 캐릭터 정보]
+${characterDescriptions}
+
+[캐릭터 일관성 요구사항]
+위에 명시된 캐릭터들은 제공된 레퍼런스 이미지와 정확히 일치해야 합니다.
+각 캐릭터의 고유한 특징을 반드시 유지하세요.
+레퍼런스 이미지의 스타일과 외형을 그대로 따라주세요.
+`;
+    }
+    
+    return {
+      enhancedPrompt,
+      detectedCharacters: selectedCharacters,
+      characterDescriptions,
+      referenceImages,
+    };
+  }
+
+  /**
    * 사용자의 모든 캐릭터 로드
    */
   async loadUserCharacters(userId: string): Promise<void> {

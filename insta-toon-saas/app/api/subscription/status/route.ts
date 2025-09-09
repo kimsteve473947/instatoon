@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
         success: true,
         subscription: {
           ...freeSubscription,
-          planInfo: SUBSCRIPTION_PLANS.PERSONAL, // FREE 플랜이 SUBSCRIPTION_PLANS에 없으므로 임시로 PERSONAL 사용
+          planInfo: SUBSCRIPTION_PLANS.FREE,
         },
       });
     }

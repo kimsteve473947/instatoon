@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { prisma } from "@/lib/db/prisma";
 
 // 캐릭터 등록
 export async function POST(request: NextRequest) {
@@ -39,9 +38,11 @@ export async function POST(request: NextRequest) {
     const allAliases = [...new Set([...aliases, ...autoAliases])];
 
     // 사용자 정보 조회
-    const userData = await prisma.user.findUnique({
-      where: { supabaseId: user.id }
-    });
+    const { data: userData } = await supabase
+      .from('user')
+      .select('id')
+      .eq('supabaseId', user.id)
+      .single();
 
     if (!userData) {
       return NextResponse.json(
@@ -51,16 +52,19 @@ export async function POST(request: NextRequest) {
     }
 
     // 구독 정보 확인 (캐릭터 개수 제한)
-    const subscription = await prisma.subscription.findUnique({
-      where: { userId: userData.id }
-    });
+    const { data: subscription } = await supabase
+      .from('subscription')
+      .select('maxCharacters')
+      .eq('userId', userData.id)
+      .single();
 
-    const currentCharacterCount = await prisma.character.count({
-      where: { userId: userData.id }
-    });
+    const { count: currentCharacterCount } = await supabase
+      .from('character')
+      .select('id', { count: 'exact' })
+      .eq('userId', userData.id);
 
     const maxCharacters = subscription?.maxCharacters || 1;
-    if (currentCharacterCount >= maxCharacters) {
+    if ((currentCharacterCount || 0) >= maxCharacters) {
       return NextResponse.json(
         { 
           success: false, 
@@ -71,17 +75,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 캐릭터 등록 (Prisma 사용)
-    const character = await prisma.character.create({
-      data: {
+    // 캐릭터 등록
+    const { data: character, error: insertError } = await supabase
+      .from('character')
+      .insert({
         userId: userData.id,
         name,
         description,
         styleGuide: personality || "",
         referenceImages: referenceImages || [],
         thumbnailUrl: referenceImages && referenceImages.length > 0 ? referenceImages[0] : null,
-      }
-    });
+      })
+      .select()
+      .single();
+
+    if (insertError) {
+      throw insertError;
+    }
 
     return NextResponse.json({
       success: true,
@@ -124,9 +134,11 @@ export async function GET(request: NextRequest) {
     }
 
     // 사용자 정보 조회
-    const userData = await prisma.user.findUnique({
-      where: { supabaseId: user.id }
-    });
+    const { data: userData } = await supabase
+      .from('user')
+      .select('id')
+      .eq('supabaseId', user.id)
+      .single();
 
     if (!userData) {
       return NextResponse.json(
@@ -135,11 +147,12 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // 모든 캐릭터 조회 (Prisma 사용)
-    const characters = await prisma.character.findMany({
-      where: { userId: userData.id },
-      orderBy: { updatedAt: 'desc' }
-    });
+    // 모든 캐릭터 조회
+    const { data: characters } = await supabase
+      .from('character')
+      .select('*')
+      .eq('userId', userData.id)
+      .order('updatedAt', { ascending: false });
 
     const formattedCharacters = characters.map(char => ({
       id: char.id,
@@ -191,9 +204,11 @@ export async function PUT(request: NextRequest) {
     }
 
     // 사용자 정보 조회
-    const userData = await prisma.user.findUnique({
-      where: { supabaseId: user.id }
-    });
+    const { data: userData } = await supabase
+      .from('user')
+      .select('id')
+      .eq('supabaseId', user.id)
+      .single();
 
     if (!userData) {
       return NextResponse.json(
@@ -202,26 +217,25 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    // 캐릭터 업데이트 (Prisma 사용)
-    const updatedCount = await prisma.character.updateMany({
-      where: { 
-        id: characterId,
-        userId: userData.id 
-      },
-      data: {
-        ...(updates.name && { name: updates.name }),
-        ...(updates.description !== undefined && { description: updates.description }),
-        ...(updates.styleGuide !== undefined && { styleGuide: updates.styleGuide }),
-        ...(updates.referenceImages && { 
-          referenceImages: updates.referenceImages,
-          thumbnailUrl: updates.referenceImages.length > 0 ? updates.referenceImages[0] : null
-        }),
-        ...(updates.isFavorite !== undefined && { isFavorite: updates.isFavorite }),
-        updatedAt: new Date(),
-      }
-    });
+    // 캐릭터 업데이트
+    const updateData: any = {};
+    if (updates.name) updateData.name = updates.name;
+    if (updates.description !== undefined) updateData.description = updates.description;
+    if (updates.styleGuide !== undefined) updateData.styleGuide = updates.styleGuide;
+    if (updates.referenceImages) {
+      updateData.referenceImages = updates.referenceImages;
+      updateData.thumbnailUrl = updates.referenceImages.length > 0 ? updates.referenceImages[0] : null;
+    }
+    if (updates.isFavorite !== undefined) updateData.isFavorite = updates.isFavorite;
+    updateData.updatedAt = new Date().toISOString();
 
-    if (updatedCount.count === 0) {
+    const { error: updateError } = await supabase
+      .from('character')
+      .update(updateData)
+      .eq('id', characterId)
+      .eq('userId', userData.id);
+
+    if (updateError) {
       return NextResponse.json(
         { success: false, error: "캐릭터를 찾을 수 없거나 권한이 없습니다" },
         { status: 404 }
@@ -266,9 +280,11 @@ export async function DELETE(request: NextRequest) {
     }
 
     // 사용자 정보 조회
-    const userData = await prisma.user.findUnique({
-      where: { supabaseId: user.id }
-    });
+    const { data: userData } = await supabase
+      .from('user')
+      .select('id')
+      .eq('supabaseId', user.id)
+      .single();
 
     if (!userData) {
       return NextResponse.json(
@@ -277,15 +293,14 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    // 캐릭터 삭제 (Prisma 사용)
-    const deletedCount = await prisma.character.deleteMany({
-      where: { 
-        id: characterId,
-        userId: userData.id 
-      }
-    });
+    // 캐릭터 삭제
+    const { error: deleteError } = await supabase
+      .from('character')
+      .delete()
+      .eq('id', characterId)
+      .eq('userId', userData.id);
 
-    if (deletedCount.count === 0) {
+    if (deleteError) {
       return NextResponse.json(
         { success: false, error: "캐릭터를 찾을 수 없거나 권한이 없습니다" },
         { status: 404 }

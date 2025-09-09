@@ -68,10 +68,9 @@ export function formatFileSize(bytes: number): string {
 // 구독 플랜별 한계값 가져오기
 export function getSubscriptionLimits(plan: string) {
   const limits = {
-    FREE: { tokens: 10, characters: 1, projects: 3 },
-    PERSONAL: { tokens: 500000, characters: 3, projects: Infinity },
-    HEAVY: { tokens: 2000000, characters: 5, projects: Infinity },
-    ENTERPRISE: { tokens: 5000000, characters: Infinity, projects: Infinity },
+    FREE: { tokens: 10, characters: 2, projects: 3 },
+    PRO: { tokens: 500000, characters: 3, projects: Infinity },
+    PREMIUM: { tokens: 2000000, characters: 5, projects: Infinity },
   };
   return limits[plan as keyof typeof limits] || limits.FREE;
 }

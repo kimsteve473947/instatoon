@@ -1,9 +1,18 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { 
   Plus, 
   Search, 
@@ -19,7 +28,15 @@ import {
   SortAsc,
   Users,
   Download,
-  ChevronRight
+  ChevronRight,
+  Trash2,
+  AlertCircle,
+  Settings,
+  Archive,
+  RotateCcw,
+  HardDrive,
+  Crown,
+  X
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from 'next/navigation';
@@ -32,6 +49,7 @@ interface Project {
   thumbnail?: string;
   panelCount: number;
   status: 'draft' | 'completed';
+  isEmpty?: boolean; // 빈 프로젝트 여부
 }
 
 interface Character {
@@ -50,6 +68,16 @@ interface GeneratedImage {
   projectId?: string;
 }
 
+interface StorageInfo {
+  usedBytes: number;
+  maxBytes: number;
+  usagePercentage: number;
+  formatted: {
+    used: string;
+    max: string;
+  };
+}
+
 export default function ProjectsPage() {
   const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
@@ -59,6 +87,10 @@ export default function ProjectsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'all' | 'webtoon' | 'characters' | 'images'>('all');
   const [loading, setLoading] = useState(true);
+  const [showEmptyProjects, setShowEmptyProjects] = useState(false); // 빈 프로젝트 표시 여부
+  const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null);
+  const [showStorageDropdown, setShowStorageDropdown] = useState(false);
+  const storageDropdownRef = useRef<HTMLDivElement>(null);
   
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -67,38 +99,48 @@ export default function ProjectsPage() {
 
   useEffect(() => {
     loadDashboardData();
+    loadStorageInfo();
   }, []);
+
+  // 외부 클릭 시 드롭다운 닫기
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (storageDropdownRef.current && !storageDropdownRef.current.contains(event.target as Node)) {
+        setShowStorageDropdown(false);
+      }
+    };
+
+    if (showStorageDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showStorageDropdown]);
+
+  const loadStorageInfo = async () => {
+    try {
+      const response = await fetch('/api/storage/check');
+      if (response.ok) {
+        const data = await response.json();
+        setStorageInfo(data);
+      }
+    } catch (error) {
+      console.error('Failed to load storage info:', error);
+    }
+  };
 
   const loadDashboardData = async () => {
     try {
-      const isDevelopment = process.env.NODE_ENV === 'development';
+      // 정상적인 인증 플로우 사용 (개발/프로덕션 모두)
+      const { data: { user } } = await supabase.auth.getUser();
       
-      if (isDevelopment) {
-        // 개발 모드: 로컬 스토리지에서 데이터 로드
-        console.log('Development mode: Loading local data');
-        
-        // 로컬 스토리지에서 프로젝트 데이터 가져오기
-        const savedProjects = localStorage.getItem('instatoon_projects');
-        const savedCharacters = localStorage.getItem('instatoon_characters');
-        const savedImages = localStorage.getItem('instatoon_generated_images');
-        
-        if (savedProjects) {
-          setProjects(JSON.parse(savedProjects));
-        }
-        if (savedCharacters) {
-          setCharacters(JSON.parse(savedCharacters));
-        }
-        if (savedImages) {
-          setGeneratedImages(JSON.parse(savedImages));
-        }
-        
-        setLoading(false);
+      if (!user) {
+        // 인증되지 않은 경우 로그인 페이지로 리다이렉트
+        router.push('/sign-in?redirectTo=/projects');
         return;
       }
-      
-      // 프로덕션 모드: 실제 데이터베이스에서 로드
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
 
       // 사용자 데이터 가져오기
       const { data: userData } = await supabase
@@ -107,23 +149,66 @@ export default function ProjectsPage() {
         .eq('supabaseId', user.id)
         .single();
 
-      if (!userData) return;
+      if (!userData) {
+        console.log('No user data found');
+        return;
+      }
 
-      // 프로젝트 데이터 로드
-      const { data: projectsData } = await supabase
+      // 프로젝트와 패널을 한 번의 쿼리로 조인해서 가져오기
+      const { data: projectsData, error: projectsError } = await supabase
         .from('project')
-        .select('*')
+        .select(`
+          id,
+          title,
+          createdAt,
+          lasteditedat,
+          isdraft,
+          episodecount,
+          panels:panel(
+            id,
+            order,
+            prompt,
+            generationId,
+            imageUrl,
+            editData,
+            generation:generationId(imageUrl)
+          )
+        `)
         .eq('userId', userData.id)
+        .is('deletedAt', null)
         .order('lasteditedat', { ascending: false });
 
-      const formattedProjects = projectsData?.map(project => ({
-        id: project.id,
-        title: project.title || '무제 프로젝트',
-        createdAt: project.createdAt,
-        updatedAt: project.lasteditedat || project.createdAt,
-        panelCount: project.episodecount || 0,
-        status: (project.isdraft ? 'draft' : 'completed') as 'draft' | 'completed'
-      })) || [];
+      if (projectsError) {
+        console.error('Projects query error:', projectsError);
+        setLoading(false);
+        return;
+      }
+
+      // 프로젝트 데이터 변환 (패널 정보 포함)
+      const projectsWithThumbnails = (projectsData || []).map((project) => {
+        const panels = project.panels || [];
+        const firstPanel = panels.length > 0 ? panels.sort((a, b) => a.order - b.order)[0] : null;
+        const panelCount = panels.length;
+        
+        // 실제 작업이 있는지 확인
+        const hasImage = firstPanel?.generation?.imageUrl || firstPanel?.imageUrl;
+        const hasElements = firstPanel?.editData?.elements && firstPanel.editData.elements.length > 0;
+        const hasPrompt = firstPanel?.prompt && firstPanel.prompt.trim().length > 0;
+        const hasContent = panelCount > 0 && (hasImage || hasElements || hasPrompt);
+        
+        return {
+          id: project.id,
+          title: project.title || '무제 프로젝트',
+          createdAt: project.createdAt,
+          updatedAt: project.lasteditedat || project.createdAt,
+          panelCount: project.episodecount || panelCount,
+          status: (project.isdraft ? 'draft' : 'completed') as 'draft' | 'completed',
+          thumbnail: firstPanel?.generation?.imageUrl || firstPanel?.imageUrl || null,
+          isEmpty: !hasContent
+        };
+      });
+
+      const formattedProjects = projectsWithThumbnails;
 
       // 캐릭터 데이터 로드
       const { data: charactersData } = await supabase
@@ -171,9 +256,43 @@ export default function ProjectsPage() {
     router.push('/studio');
   };
 
-  const filteredProjects = projects.filter(project =>
-    project.title.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const handleMoveToTrash = async (projectId: string, e: React.MouseEvent) => {
+    e.preventDefault(); // Link 클릭 방지
+    e.stopPropagation();
+    
+    try {
+      // Supabase에서 프로젝트를 휴지통으로 이동 (soft delete)
+      const { error } = await supabase
+        .from('project')
+        .update({ deletedAt: new Date().toISOString() })
+        .eq('id', projectId);
+
+      if (error) throw error;
+
+      // UI에서 즉시 제거
+      setProjects(prev => prev.filter(p => p.id !== projectId));
+      
+      // 토스트 메시지 표시 (나중에 추가 가능)
+      console.log('Project moved to trash:', projectId);
+    } catch (error) {
+      console.error('Error moving project to trash:', error);
+    }
+  };
+
+  const filteredProjects = projects.filter(project => {
+    // 검색어 필터
+    const matchesSearch = project.title.toLowerCase().includes(searchQuery.toLowerCase());
+    
+    // 프로젝트 표시 조건
+    if (showEmptyProjects) {
+      // 빈 프로젝트 보기 모드: 모든 프로젝트 표시 (빈 프로젝트 포함)
+      return matchesSearch;
+    } else {
+      // 기본 모드: 빈 프로젝트가 아닌 것들만 표시
+      return matchesSearch && !project.isEmpty;
+    }
+  });
+
 
   const filteredCharacters = characters.filter(character =>
     character.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -201,12 +320,7 @@ export default function ProjectsPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center space-x-4">
-              <h1 className="text-2xl font-bold text-gray-900">내 작업 공간</h1>
-              {process.env.NODE_ENV === 'development' && (
-                <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full font-medium">
-                  개발 모드
-                </span>
-              )}
+              <h1 className="text-2xl font-bold text-gray-900">작업내역</h1>
               <div className="flex items-center text-sm text-gray-500">
                 <FolderOpen className="h-4 w-4 mr-1" />
                 <span>{projects.length}개 프로젝트</span>
@@ -216,10 +330,120 @@ export default function ProjectsPage() {
                 <span className="mx-2">•</span>
                 <ImageIcon className="h-4 w-4 mr-1" />
                 <span>{generatedImages.length}개 이미지</span>
+                <span className="mx-2">•</span>
+                
+                {/* 용량 표시 - 클릭 가능 */}
+                <div className="relative" ref={storageDropdownRef}>
+                  <button
+                    onClick={() => setShowStorageDropdown(!showStorageDropdown)}
+                    className="flex items-center gap-1 px-2 py-1 rounded-md hover:bg-purple-50 transition-colors group"
+                  >
+                    <HardDrive className="h-4 w-4 text-purple-600" />
+                    <span className="font-semibold text-purple-600">
+                      {storageInfo ? storageInfo.formatted.used : '0.01GB'}
+                    </span>
+                    <span className="text-gray-400">/</span>
+                    <span className="text-gray-600">{storageInfo ? storageInfo.formatted.max : '1GB'}</span>
+                    <ChevronRight className={`h-3 w-3 text-gray-400 transition-transform ${showStorageDropdown ? 'rotate-90' : ''}`} />
+                  </button>
+                  
+                  {/* 드롭다운 패널 */}
+                  {showStorageDropdown && (
+                    <div className="absolute top-full left-0 mt-2 w-80 bg-white rounded-xl shadow-2xl border border-gray-200 overflow-hidden z-50 animate-in slide-in-from-top-2">
+                      {/* 헤더 */}
+                      <div className="bg-gradient-to-r from-purple-50 to-pink-50 px-4 py-3 border-b border-gray-100">
+                        <div className="flex items-center justify-between">
+                          <h3 className="font-bold text-gray-900 flex items-center gap-2">
+                            <HardDrive className="h-4 w-4 text-purple-600" />
+                            업로드 정보
+                          </h3>
+                          <button
+                            onClick={() => setShowStorageDropdown(false)}
+                            className="text-gray-400 hover:text-gray-600"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                      
+                      {/* 메인 컨텐츠 */}
+                      <div className="p-4 space-y-4">
+                        {/* 사용량 표시 */}
+                        <div>
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-2xl font-bold text-gray-900">
+                              {storageInfo ? `${storageInfo.usagePercentage.toFixed(1)}%` : '1.0%'} 사용중
+                            </span>
+                            <span className="text-sm">
+                              <span className="font-semibold text-purple-600">
+                                {storageInfo ? storageInfo.formatted.used : '0.01GB'}
+                              </span>
+                              <span className="text-gray-400 mx-1">/</span>
+                              <span className="text-gray-700">
+                                {storageInfo ? storageInfo.formatted.max : '1GB'}
+                              </span>
+                            </span>
+                          </div>
+                          
+                          {/* 프로그레스 바 */}
+                          <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                            <div 
+                              className="h-full transition-all duration-300 bg-gradient-to-r from-purple-500 to-pink-500"
+                              style={{ width: storageInfo ? `${Math.min(storageInfo.usagePercentage, 100)}%` : '1%' }}
+                            />
+                          </div>
+                        </div>
+                        
+                        {/* 파일 타입 안내 */}
+                        <div className="text-xs text-gray-600 bg-gray-50 rounded-lg p-3">
+                          <div className="font-semibold mb-1.5">업로드 가능 파일</div>
+                          <div className="space-y-0.5">
+                            <div>• 이미지 : JPG, PNG, SVG</div>
+                            <div>• 동영상 : GIF, MP4, MOV</div>
+                            <div>• 음악 : MP3, M4A</div>
+                          </div>
+                        </div>
+                        
+                        {/* 업그레이드 배너 */}
+                        {(!storageInfo || storageInfo.maxBytes === 1024 * 1024 * 1024) && (
+                          <div className="bg-gradient-to-r from-yellow-50 to-orange-50 rounded-lg p-4 border border-yellow-200">
+                            <div className="flex items-start gap-3">
+                              <Crown className="h-5 w-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+                              <div className="flex-1">
+                                <h4 className="font-bold text-gray-900 text-sm mb-1">
+                                  10GB의 저장 공간 사용하기
+                                </h4>
+                                <p className="text-xs text-gray-600 mb-3">
+                                  Pro 요금제로 업그레이드하면 10GB의<br />
+                                  개인 저장 공간을 사용할 수 있어요.
+                                </p>
+                                <Link href="/pricing" onClick={() => setShowStorageDropdown(false)}>
+                                  <Button size="sm" className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-medium">
+                                    1개월간 무료로 사용하기
+                                  </Button>
+                                </Link>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
             <div className="flex items-center space-x-3">
+              {/* 휴지통 버튼 */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => router.push('/trash')}
+                className="bg-gray-50 hover:bg-gray-100"
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                휴지통
+              </Button>
               <Button
                 onClick={handleNewProject}
                 className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700"
@@ -233,6 +457,7 @@ export default function ProjectsPage() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
         {/* 필터 바 */}
         <div className="mb-8 flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
           <div className="flex items-center space-x-6">
@@ -331,16 +556,27 @@ export default function ProjectsPage() {
                 <h2 className="text-xl font-semibold text-gray-900 flex items-center">
                   <FolderOpen className="h-5 w-5 mr-2 text-purple-600" />
                   웹툰 스페이스
-                  <span className="ml-2 text-sm font-normal text-gray-500">({projects.length}개)</span>
+                  <span className="ml-2 text-sm font-normal text-gray-500">({filteredProjects.length}개)</span>
                 </h2>
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  className="text-gray-600 hover:text-purple-600"
-                  onClick={() => setActiveTab('webtoon')}
-                >
-                  전체 보기 <ChevronRight className="ml-1 h-4 w-4" />
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant={showEmptyProjects ? "outline" : "ghost"}
+                    size="sm"
+                    onClick={() => setShowEmptyProjects(!showEmptyProjects)}
+                    className={showEmptyProjects ? "bg-orange-50 border-orange-300 text-orange-600 hover:bg-orange-100" : "text-gray-600 hover:text-gray-900"}
+                  >
+                    <Eye className="h-4 w-4 mr-2" />
+                    빈 프로젝트 {showEmptyProjects ? '숨기기' : '보기'}
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    className="text-gray-600 hover:text-purple-600"
+                    onClick={() => setActiveTab('webtoon')}
+                  >
+                    전체 보기 <ChevronRight className="ml-1 h-4 w-4" />
+                  </Button>
+                </div>
               </div>
 
               <div className="relative">
@@ -360,45 +596,75 @@ export default function ProjectsPage() {
                   </div>
 
                   {/* 프로젝트 카드들 */}
-                  {projects.slice(0, 8).map((project) => (
-                    <Link key={project.id} href={`/studio?projectId=${project.id}`}>
-                      <div className="flex-shrink-0 w-48 aspect-[4/5] bg-white rounded-xl border border-gray-200 hover:border-purple-300 hover:shadow-lg transition-all cursor-pointer relative overflow-hidden group">
-                        <div className="absolute inset-4 top-4 bottom-16 bg-gradient-to-br from-purple-50 to-pink-50 rounded-lg flex items-center justify-center">
-                          {project.thumbnail ? (
-                            <img 
-                              src={project.thumbnail} 
-                              alt={project.title}
-                              className="w-full h-full object-cover rounded-lg"
-                            />
-                          ) : (
-                            <div className="text-center">
-                              <FolderOpen className="h-8 w-8 text-gray-300 mx-auto mb-1" />
-                              <span className="text-xs text-gray-400">{project.panelCount}개 패널</span>
+                  {filteredProjects.slice(0, 8).map((project) => (
+                    <div key={project.id} className="flex-shrink-0 w-48 relative group">
+                      <Link href={`/studio?projectId=${project.id}`}>
+                        <div className="aspect-[4/5] bg-white rounded-xl border border-gray-200 hover:border-purple-300 hover:shadow-lg transition-all cursor-pointer relative overflow-hidden">
+                          <div className="absolute inset-4 top-4 bottom-16 bg-gradient-to-br from-purple-50 to-pink-50 rounded-lg flex items-center justify-center">
+                            {project.thumbnail ? (
+                              <img 
+                                src={project.thumbnail} 
+                                alt={project.title}
+                                className="w-full h-full object-cover rounded-lg"
+                              />
+                            ) : (
+                              <div className="text-center">
+                                <FolderOpen className="h-8 w-8 text-gray-300 mx-auto mb-1" />
+                                <span className="text-xs text-gray-400">{project.panelCount}개 패널</span>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="absolute top-3 left-3">
+                            <span className={`inline-block px-2 py-1 text-xs font-medium rounded ${
+                              project.status === 'completed' 
+                                ? 'text-green-600 bg-green-100' 
+                                : 'text-orange-600 bg-orange-100'
+                            }`}>
+                              {project.status === 'completed' ? '완성' : '작업중'}
+                            </span>
+                          </div>
+
+                          <div className="absolute bottom-4 left-4 right-4">
+                            <h3 className="text-sm font-semibold text-gray-900 mb-1 truncate">
+                              {project.title}
+                            </h3>
+                            <div className="flex items-center text-xs text-gray-500">
+                              <Clock className="h-3 w-3 mr-1" />
+                              <span>{new Date(project.updatedAt).toLocaleDateString()}</span>
                             </div>
-                          )}
-                        </div>
-
-                        <div className="absolute top-3 left-3">
-                          <span className={`inline-block px-2 py-1 text-xs font-medium rounded ${
-                            project.status === 'completed' 
-                              ? 'text-green-600 bg-green-100' 
-                              : 'text-orange-600 bg-orange-100'
-                          }`}>
-                            {project.status === 'completed' ? '완성' : '작업중'}
-                          </span>
-                        </div>
-
-                        <div className="absolute bottom-4 left-4 right-4">
-                          <h3 className="text-sm font-semibold text-gray-900 mb-1 truncate">
-                            {project.title}
-                          </h3>
-                          <div className="flex items-center text-xs text-gray-500">
-                            <Clock className="h-3 w-3 mr-1" />
-                            <span>{new Date(project.updatedAt).toLocaleDateString()}</span>
                           </div>
                         </div>
+                      </Link>
+
+                      {/* 액션 드롭다운 메뉴 */}
+                      <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 bg-white/90 backdrop-blur">
+                              <MoreVertical className="h-3 w-3" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuLabel>프로젝트 관리</DropdownMenuLabel>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem asChild>
+                              <Link href={`/studio?projectId=${project.id}`}>
+                                <Settings className="h-4 w-4 mr-2" />
+                                편집하기
+                              </Link>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem 
+                              onClick={(e) => handleMoveToTrash(project.id, e)}
+                              className="text-red-600 focus:text-red-600"
+                            >
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              휴지통으로 이동
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
-                    </Link>
+                    </div>
                   ))}
                 </div>
               </div>
@@ -527,6 +793,25 @@ export default function ProjectsPage() {
                 웹툰 스페이스
                 <span className="ml-2 text-sm font-normal text-gray-500">({filteredProjects.length}개)</span>
               </h2>
+              <div className="flex items-center gap-3">
+                {/* 빈 프로젝트 표시 토글 */}
+                <Button
+                  variant={showEmptyProjects ? "outline" : "ghost"}
+                  size="sm"
+                  onClick={() => setShowEmptyProjects(!showEmptyProjects)}
+                  className={showEmptyProjects ? "bg-orange-50 border-orange-300 text-orange-600 hover:bg-orange-100" : "text-gray-600 hover:text-gray-900"}
+                >
+                  <Eye className="h-4 w-4 mr-2" />
+                  빈 프로젝트 {showEmptyProjects ? '숨기기' : '보기'}
+                </Button>
+                <Button
+                  onClick={handleNewProject}
+                  className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  새 웹툰 만들기
+                </Button>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6">
@@ -546,56 +831,100 @@ export default function ProjectsPage() {
 
               {/* 프로젝트 카드들 */}
               {filteredProjects.map((project) => (
-                <Link key={project.id} href={`/studio?projectId=${project.id}`}>
-                  <div className="group aspect-[4/5] bg-white rounded-xl border border-gray-200 hover:border-purple-300 hover:shadow-lg transition-all cursor-pointer relative overflow-hidden">
-                    {/* 프로젝트 썸네일 */}
-                    <div className="absolute inset-4 top-4 bottom-16 bg-gradient-to-br from-purple-50 to-pink-50 rounded-lg flex items-center justify-center">
-                      {project.thumbnail ? (
-                        <img 
-                          src={project.thumbnail} 
-                          alt={project.title}
-                          className="w-full h-full object-cover rounded-lg"
-                        />
-                      ) : (
-                        <div className="text-center">
-                          <FolderOpen className="h-12 w-12 text-gray-300 mx-auto mb-2" />
-                          <span className="text-xs text-gray-400">{project.panelCount}개 패널</span>
+                <div key={project.id} className="relative group">
+                  <Link href={`/studio?projectId=${project.id}`}>
+                    <div className={`aspect-[4/5] bg-white rounded-xl border ${project.isEmpty ? 'border-orange-200 bg-orange-50' : 'border-gray-200'} hover:border-purple-300 hover:shadow-lg transition-all cursor-pointer relative overflow-hidden`}>
+                      {/* 프로젝트 썸네일 */}
+                      <div className="absolute inset-4 top-4 bottom-16 bg-gradient-to-br from-purple-50 to-pink-50 rounded-lg overflow-hidden">
+                        {project.thumbnail ? (
+                          <img 
+                            src={project.thumbnail} 
+                            alt={project.title}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <div className="flex items-center justify-center h-full">
+                            <div className="text-center">
+                              {project.isEmpty ? (
+                                <>
+                                  <AlertCircle className="h-12 w-12 text-orange-300 mx-auto mb-2" />
+                                  <span className="text-xs text-orange-500">
+                                    빈 프로젝트
+                                  </span>
+                                </>
+                              ) : (
+                                <>
+                                  <FolderOpen className="h-12 w-12 text-gray-300 mx-auto mb-2" />
+                                  <span className="text-xs text-gray-400">
+                                    {project.panelCount > 0 ? `${project.panelCount}개 패널` : '썸네일 없음'}
+                                  </span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 상태 배지 */}
+                      <div className="absolute top-4 left-4">
+                        {project.isEmpty ? (
+                          <span className="inline-block px-2 py-1 text-xs font-medium rounded bg-orange-500 text-white">
+                            빈 프로젝트
+                          </span>
+                        ) : (
+                          <span className={`inline-block px-2 py-1 text-xs font-medium rounded ${
+                            project.status === 'completed' 
+                              ? 'text-green-600 bg-green-100' 
+                              : 'text-orange-600 bg-orange-100'
+                          }`}>
+                            {project.status === 'completed' ? '완성' : '작업중'}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* 프로젝트 정보 */}
+                      <div className="absolute bottom-4 left-4 right-4">
+                        <h3 className="text-sm font-semibold text-gray-900 mb-1 truncate">
+                          {project.title}
+                        </h3>
+                        <div className="flex items-center text-xs text-gray-500">
+                          <Clock className="h-3 w-3 mr-1" />
+                          <span>{new Date(project.updatedAt).toLocaleDateString()}</span>
+                          <span className="mx-2">•</span>
+                          <span>{project.panelCount > 0 ? `${project.panelCount}컷` : '0컷'}</span>
                         </div>
-                      )}
-                    </div>
-
-                    {/* 상태 배지 */}
-                    <div className="absolute top-4 left-4">
-                      <span className={`inline-block px-2 py-1 text-xs font-medium rounded ${
-                        project.status === 'completed' 
-                          ? 'text-green-600 bg-green-100' 
-                          : 'text-orange-600 bg-orange-100'
-                      }`}>
-                        {project.status === 'completed' ? '완성' : '작업중'}
-                      </span>
-                    </div>
-
-                    {/* 액션 버튼 */}
-                    <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0 bg-white/90 backdrop-blur">
-                        <MoreVertical className="h-4 w-4" />
-                      </Button>
-                    </div>
-
-                    {/* 프로젝트 정보 */}
-                    <div className="absolute bottom-4 left-4 right-4">
-                      <h3 className="text-sm font-semibold text-gray-900 mb-1 truncate">
-                        {project.title}
-                      </h3>
-                      <div className="flex items-center text-xs text-gray-500">
-                        <Clock className="h-3 w-3 mr-1" />
-                        <span>{new Date(project.updatedAt).toLocaleDateString()}</span>
-                        <span className="mx-2">•</span>
-                        <span>{project.panelCount}컷</span>
                       </div>
                     </div>
+                  </Link>
+
+                  {/* 액션 드롭다운 메뉴 */}
+                  <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0 bg-white/90 backdrop-blur">
+                          <MoreVertical className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuLabel>프로젝트 관리</DropdownMenuLabel>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem asChild>
+                          <Link href={`/studio?projectId=${project.id}`}>
+                            <Settings className="h-4 w-4 mr-2" />
+                            편집하기
+                          </Link>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem 
+                          onClick={(e) => handleMoveToTrash(project.id, e)}
+                          className="text-red-600 focus:text-red-600"
+                        >
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          휴지통으로 이동
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
-                </Link>
+                </div>
               ))}
             </div>
           </section>

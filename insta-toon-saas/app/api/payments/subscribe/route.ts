@@ -8,15 +8,15 @@ import { SubscriptionPlan } from "@/types";
 
 // 플랜별 가격 정보
 const PLAN_PRICES = {
-  [SubscriptionPlan.PERSONAL]: 30000,
-  [SubscriptionPlan.HEAVY]: 100000,
-  [SubscriptionPlan.ENTERPRISE]: 200000,
+  [SubscriptionPlan.FREE]: 0,
+  [SubscriptionPlan.PRO]: 30000,
+  [SubscriptionPlan.PREMIUM]: 100000,
 };
 
 const PLAN_TOKENS = {
-  [SubscriptionPlan.PERSONAL]: 500000,
-  [SubscriptionPlan.HEAVY]: 2000000,
-  [SubscriptionPlan.ENTERPRISE]: 5000000,
+  [SubscriptionPlan.FREE]: 10,
+  [SubscriptionPlan.PRO]: 500000,
+  [SubscriptionPlan.PREMIUM]: 2000000,
 };
 
 export async function POST(request: NextRequest) {

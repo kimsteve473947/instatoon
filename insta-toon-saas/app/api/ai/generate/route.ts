@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { nanoBananaService } from "@/lib/ai/nano-banana-service";
 import { tokenManager } from "@/lib/subscription/token-manager";
 import { memoryCache } from "@/lib/cache/memory-cache";
+import { canUploadFile, updateStorageUsage, saveFileMetadata } from "@/lib/storage/storage-manager";
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -33,7 +34,9 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { prompt, characterIds, projectId, panelId, settings } = body;
+    const { prompt, characterIds, projectId, panelId, settings, aspectRatio } = body;
+    
+    console.log('📥 Received request with projectId:', projectId, 'panelId:', panelId);
 
     if (!prompt) {
       return NextResponse.json(
@@ -91,6 +94,39 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 예상 파일 크기 체크 (이미지당 약 500KB로 추정)
+    const estimatedFileSize = imageCount * 500 * 1024; // 500KB per image
+    
+    // 용량 체크 (개발 모드가 아닌 경우만)
+    if (!isDevelopment) {
+      const supabase = await createClient();
+      const { data: userData } = await supabase
+        .from('user')
+        .select('id')
+        .eq('supabaseId', userId)
+        .single();
+      
+      if (userData) {
+        const storageCheck = await canUploadFile(userData.id, estimatedFileSize);
+        
+        if (!storageCheck.canUpload) {
+          return NextResponse.json(
+            { 
+              success: false, 
+              error: "저장 공간이 부족합니다. 파일을 삭제하거나 멤버십을 업그레이드하세요.",
+              storageInfo: {
+                used: storageCheck.usedBytes,
+                max: storageCheck.maxBytes,
+                remaining: storageCheck.remainingBytes,
+                usagePercentage: storageCheck.usagePercentage
+              }
+            },
+            { status: 507 } // Insufficient Storage
+          );
+        }
+      }
+    }
+
     // 캐릭터 정보 가져오기 (캐싱 적용)
     const characterDescriptions = new Map<string, string>();
     const referenceImages: string[] = [];
@@ -135,18 +171,41 @@ export async function POST(request: NextRequest) {
     // 프롬프트 개선은 나노바나나 서비스 내부에서 처리
     // 캐릭터 자동 감지를 포함하여
 
-    // Nano Banana로 이미지 생성 (캐릭터 자동 감지 포함)
+    // 내부 비율 최적화 처리 (사용자 투명)
+    const ratio = aspectRatio || settings?.aspectRatio || '4:5';
+    
+    let width, height;
+    switch(ratio) {
+      case '16:9':
+        width = 1920;
+        height = 1080;
+        break;
+      case '1:1':
+        width = 1024;  // 완벽한 정사각형
+        height = 1024;
+        break;
+      case '4:5':
+      default:
+        width = 1024;  // 인스타그램 최적화
+        height = 1280;
+        break;
+    }
+    
+    console.log(`🔧 Internal processing: Auto-optimizing for ${ratio} ratio (${width}x${height})`);
+
+    // Nano Banana로 이미지 생성 (선택된 캐릭터 참조 포함)
     const result = await nanoBananaService.generateWebtoonPanel(
       prompt, // 원본 프롬프트 전달 (내부에서 개선)
       {
         userId, // 사용자 ID로 캐릭터 자동 로드
+        selectedCharacterIds: characterIds, // 선택된 캐릭터 ID들 전달
         referenceImages,
         characterDescriptions: characterIds?.length > 0 ? characterDescriptions : undefined,
         style: settings?.style || "Korean webtoon style",
         negativePrompt: settings?.negativePrompt,
-        aspectRatio: settings?.aspectRatio || '4:5',
-        width: settings?.width || 800,
-        height: settings?.height || 1000
+        aspectRatio: ratio,
+        width: width,
+        height: height
       }
     );
 
@@ -258,7 +317,9 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const { data: genData } = await supabase
+      console.log('💾 Saving to generation table with projectId:', projectId, 'userId:', userData.id);
+      
+      const { data: genData, error: genError } = await supabase
         .from('generation')
         .insert({
           userId: userData.id,
@@ -278,6 +339,12 @@ export async function POST(request: NextRequest) {
         })
         .select()
         .single();
+      
+      if (genError) {
+        console.error('❌ Error saving to generation table:', genError);
+      } else {
+        console.log('✅ Saved to generation table with id:', genData?.id, 'projectId:', genData?.projectId);
+      }
 
       generation = genData;
 
@@ -308,7 +375,7 @@ export async function POST(request: NextRequest) {
       imageUrl: result.imageUrl,
       thumbnailUrl: result.thumbnailUrl,
       tokensUsed: result.tokensUsed,
-      generationId: generation.id,
+      generationId: generation.id, // 중요: generationId를 반환하여 참조로 사용
       remainingTokens: tokenResult.remainingTokens,
       dailyRemaining: tokenResult.dailyRemaining,
       detectedCharacters: result.detectedCharacters,
@@ -409,18 +476,37 @@ async function getGenerationHistory(request: NextRequest) {
     const projectId = searchParams.get("projectId");
     const limit = parseInt(searchParams.get("limit") || "10");
 
-    const generations = await prisma.generation.findMany({
-      where: {
-        userId,
-        ...(projectId && { projectId }),
-      },
-      orderBy: { createdAt: "desc" },
-      take: limit,
-      include: {
-        character: true,
-        project: true,
-      },
-    });
+    // 사용자 데이터 가져오기
+    const { data: userData } = await supabase
+      .from('user')
+      .select('id')
+      .eq('supabaseId', user.id)
+      .single();
+
+    if (!userData) {
+      return NextResponse.json(
+        { success: false, error: "사용자 정보를 찾을 수 없습니다" },
+        { status: 404 }
+      );
+    }
+
+    // 생성 기록 조회 쿼리 구성
+    let query = supabase
+      .from('generation')
+      .select(`
+        *,
+        character (*),
+        project (*)
+      `)
+      .eq('userId', userData.id)
+      .order('createdAt', { ascending: false })
+      .limit(limit);
+
+    if (projectId) {
+      query = query.eq('projectId', projectId);
+    }
+
+    const { data: generations } = await query;
 
     return NextResponse.json({
       success: true,

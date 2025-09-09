@@ -39,7 +39,8 @@ import {
   Copy,
   MoreHorizontal,
   RotateCcw,
-  Edit3
+  Edit3,
+  Save
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BUBBLE_TEMPLATES, BUBBLE_CATEGORIES } from './BubbleTemplates';
@@ -49,14 +50,16 @@ import { VirtualizedTemplateList } from './VirtualizedTemplateList';
 import { CharacterSelector } from './CharacterSelector';
 import { AddCharacterModal } from './AddCharacterModal';
 import { useDebounce } from '@/hooks/useDebounce';
+import { useHistory } from '@/hooks/useHistory';
 
-// 캔버스 크기 정의 (인스타그램 권장 사이즈)
+// 캔버스 크기 정의 (최적화된 치수)
 const CANVAS_SIZES = {
-  '4:5': { width: 320, height: 400, actualWidth: 1080, actualHeight: 1350, label: '세로형' },
-  '1:1': { width: 320, height: 320, actualWidth: 1080, actualHeight: 1080, label: '정사각형' }
+  '4:5': { width: 320, height: 400, actualWidth: 1024, actualHeight: 1280, label: '세로형' },
+  '1:1': { width: 320, height: 320, actualWidth: 1024, actualHeight: 1024, label: '정사각형' },
+  '16:9': { width: 320, height: 180, actualWidth: 1920, actualHeight: 1080, label: '가로형' }
 };
 
-type CanvasRatio = '4:5' | '1:1';
+type CanvasRatio = '4:5' | '1:1' | '16:9';
 
 // 줌 레벨 정의 - 매우 세밀한 2-3% 단위
 const ZOOM_LEVELS = [
@@ -82,14 +85,24 @@ interface CanvasElement {
   fillColor?: string; // 말풍선 배경색
   strokeColor?: string; // 말풍선 테두리색
   strokeWidth?: number; // 말풍선 테두리 두께
+  isHiddenWhileDragging?: boolean; // 드래그 중 캔버스 외부에서 숨김 처리
 }
 
 interface WebtoonCut {
   id: string;
   prompt: string;
   imageUrl?: string;
+  generationId?: string; // generation 테이블 참조 ID
   elements: CanvasElement[];
   isGenerating?: boolean;
+}
+
+// 히스토리 상태 타입
+interface StudioHistoryState {
+  cuts: WebtoonCut[];
+  selectedCutId: string;
+  selectedElementId: string | null;
+  canvasRatio: CanvasRatio;
 }
 
 interface MiriCanvasStudioUltimateProps {
@@ -99,28 +112,170 @@ interface MiriCanvasStudioUltimateProps {
 }
 
 export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: MiriCanvasStudioUltimateProps) {
-  const [canvasRatio, setCanvasRatio] = useState<CanvasRatio>('4:5');
   const [zoom, setZoom] = useState<number>(100);
-  const [cuts, setCuts] = useState<WebtoonCut[]>(() => {
-    // 초기 데이터가 있으면 로드, 없으면 기본값
-    if (initialData?.workspacesettings?.panels) {
-      return initialData.workspacesettings.panels.map((panel: any) => ({
-        id: panel.id || Date.now().toString() + Math.random(),
-        prompt: panel.prompt || '',
-        imageUrl: panel.imageUrl,
-        elements: panel.editData?.elements || panel.elements || []
-      }));
+  
+  // 초기 상태 준비
+  const getInitialState = (): StudioHistoryState => {
+    // localStorage 정리 (용량 초과 방지)
+    try {
+      localStorage.removeItem('instatoon_generated_images');
+      localStorage.removeItem('instatoon_projects');
+      localStorage.removeItem('instatoon_characters');
+    } catch (e) {
+      console.log('localStorage cleanup');
     }
-    return [
-      { id: '1', prompt: '', elements: [] },
-      { id: '2', prompt: '', elements: [] }
-    ];
-  });
-  const [selectedCutId, setSelectedCutId] = useState<string>('1');
-  const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
+    
+    // 초기 데이터가 있으면 로드, 없으면 기본값
+    const initialCuts = initialData?.workspacesettings?.panels
+      ? initialData.workspacesettings.panels.map((panel: any) => ({
+          id: panel.id || Date.now().toString() + Math.random(),
+          prompt: panel.prompt || '',
+          imageUrl: panel.imageUrl,
+          generationId: panel.generationId,
+          elements: panel.editData?.elements || panel.elements || []
+        }))
+      : [
+          { id: '1', prompt: '', elements: [] },
+          { id: '2', prompt: '', elements: [] }
+        ];
+    
+    const initialRatio = initialData?.workspacesettings?.panels?.[0]?.editData?.canvasRatio || '4:5';
+    
+    return {
+      cuts: initialCuts,
+      selectedCutId: '1',
+      selectedElementId: null,
+      canvasRatio: initialRatio as CanvasRatio
+    };
+  };
+  
+  // 히스토리 관리
+  const {
+    state: historyState,
+    setState: pushHistory,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
+    set: updateStateWithoutHistory
+  } = useHistory<StudioHistoryState>(getInitialState(), { limit: 30 });
+  
+  // 히스토리 상태에서 각 값 추출
+  const { cuts: historyCuts, selectedCutId, selectedElementId, canvasRatio } = historyState;
+  
+  // 드래그/리사이즈 중일 때 사용할 임시 상태
+  const [tempCuts, setTempCuts] = useState<WebtoonCut[] | null>(null);
+  const [dragStartState, setDragStartState] = useState<WebtoonCut[] | null>(null);
+  
+  // 실제 사용할 cuts (드래그 중이면 tempCuts, 아니면 historyCuts)
+  const cuts = tempCuts || historyCuts;
+  
+  
+  // 히스토리 업데이트 헬퍼 함수
+  const updateHistory = (updates: Partial<StudioHistoryState>, clearTempCuts: boolean = true) => {
+    pushHistory(prev => ({ ...prev, ...updates }));
+    setHasUnsavedChanges(true);
+    // 드래그 중이 아닐 때만 임시 상태 초기화
+    if (clearTempCuts && !isDraggingElement && !isResizing) {
+      setTempCuts(null);
+    }
+  };
+  
+  // 기존 setState 함수들을 히스토리와 연동
+  const setCuts = (newCuts: WebtoonCut[] | ((prev: WebtoonCut[]) => WebtoonCut[])) => {
+    const updated = typeof newCuts === 'function' ? newCuts(cuts) : newCuts;
+    
+    // 드래그나 리사이즈 중일 때는 tempCuts를 초기화하지 않음
+    const shouldClearTempCuts = !isDraggingElement && !isResizing;
+    updateHistory({ cuts: updated }, shouldClearTempCuts);
+  };
+  
+  
+  // 선택 상태 변경 (히스토리에 기록하지 않음)
+  const setSelectedCutId = (id: string) => {
+    updateStateWithoutHistory(prev => ({ ...prev, selectedCutId: id }));
+  };
+  
+  const setSelectedElementId = (id: string | null) => {
+    updateStateWithoutHistory(prev => ({ ...prev, selectedElementId: id }));
+  };
+  
+  // 캔버스 비율 변경 (이것은 히스토리에 기록)
+  const setCanvasRatio = (ratio: CanvasRatio) => {
+    updateHistory({ canvasRatio: ratio });
+  };
+  
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [activeTab, setActiveTab] = useState<'bubble' | 'text' | 'ai-character' | 'ai-script'>('bubble');
   const [bubbleText, setBubbleText] = useState('');
   const [textContent, setTextContent] = useState('');
+  
+  // 드래그 및 리사이즈 상태 - 자동 저장 방지를 위해 여기로 이동
+  const [isDraggingElement, setIsDraggingElement] = useState(false);
+  const [draggedElement, setDraggedElement] = useState<{ id: string; offsetX: number; offsetY: number } | null>(null);
+  const [isResizing, setIsResizing] = useState(false);
+  const [resizeHandle, setResizeHandle] = useState<string | null>(null);
+  
+  // 드래그 상태 초기화 헬퍼
+  const resetDragState = useCallback(() => {
+    setTempCuts(null);
+    setDragStartState(null);
+    setIsDraggingElement(false);
+    setDraggedElement(null);
+    setIsResizing(false);
+    setResizeHandle(null);
+  }, []);
+
+  // 드래그 취소 (원래 상태로 복원)
+  const cancelDrag = useCallback(() => {
+    if (dragStartState) {
+      updateStateWithoutHistory(prev => ({ ...prev, cuts: dragStartState }));
+    }
+    resetDragState();
+  }, [dragStartState, updateStateWithoutHistory, resetDragState]);
+
+  // 드래그 커밋 (히스토리에 기록)
+  const commitDrag = useCallback(() => {
+    if (tempCuts) {
+      // 숨김 상태 속성 제거
+      const cleanedCuts = tempCuts.map(cut => ({
+        ...cut,
+        elements: cut.elements.map(el => {
+          if (el.isHiddenWhileDragging) {
+            const { isHiddenWhileDragging, ...cleanElement } = el;
+            return cleanElement;
+          }
+          return el;
+        })
+      }));
+      
+      // 히스토리에 업데이트 (tempCuts 초기화하지 않음)
+      updateHistory({ cuts: cleanedCuts }, false);
+      
+      // 드래그 상태 초기화
+      setTempCuts(null);
+      setDragStartState(null);  
+      setIsDraggingElement(false);
+      setDraggedElement(null);
+      setIsResizing(false);
+      setResizeHandle(null);
+    } else {
+      // tempCuts가 없으면 단순히 드래그 상태만 초기화
+      resetDragState();
+    }
+  }, [tempCuts, updateHistory, resetDragState]);
+
+  // ESC 키로 드래그/리사이즈 취소
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && (isDraggingElement || isResizing)) {
+        cancelDrag();
+      }
+    };
+    
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [isDraggingElement, isResizing, cancelDrag]);
   const [selectedBubbleCategory, setSelectedBubbleCategory] = useState<string>('speech');
   const [isDraggingBubble, setIsDraggingBubble] = useState(false);
   const [draggedBubbleId, setDraggedBubbleId] = useState<string | null>(null);
@@ -130,6 +285,13 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editingCutId, setEditingCutId] = useState<string | null>(null);
   const [editPrompt, setEditPrompt] = useState("");
+  
+  // 저장 유도 모달
+  const [savePromptModalOpen, setSavePromptModalOpen] = useState(false);
+  const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null);
+  
+  // 저장 성공 알림
+  const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   
   // 캐릭터 상태
   const [selectedCharacters, setSelectedCharacters] = useState<string[]>([]);
@@ -178,14 +340,74 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
       }
     }
   }, [initialData]);
+
+  // cuts 변경 감지 (변경사항 추적) - 제거
+  // 이미 updateHistory 함수에서 setHasUnsavedChanges(true)를 호출하므로 중복 제거
+
+  // 자동 저장 (디바운스 적용) - 드래그/리사이즈 중이 아닐 때만 저장
+  const debouncedCuts = useDebounce(cuts, 5000); // 5초 디바운스
   
-  // 요소 드래그 상태
-  const [isDraggingElement, setIsDraggingElement] = useState(false);
-  const [draggedElement, setDraggedElement] = useState<{ id: string; offsetX: number; offsetY: number } | null>(null);
-  
-  // 리사이즈 상태
-  const [isResizing, setIsResizing] = useState(false);
-  const [resizeHandle, setResizeHandle] = useState<string | null>(null);
+  useEffect(() => {
+    // 드래그나 리사이즈 중이면 자동 저장 건너뛰기
+    if (isDraggingElement || isResizing) return;
+    
+    if (debouncedCuts && hasUnsavedChanges && onSave) {
+      console.log('🔄 자동 저장 중...');
+      autoSaveProject().then(() => {
+        console.log('✅ 자동 저장 완료');
+        setHasUnsavedChanges(false);
+      }).catch((error) => {
+        console.error('❌ 자동 저장 실패:', error);
+      });
+    }
+  }, [debouncedCuts, hasUnsavedChanges, onSave, isDraggingElement, isResizing]);
+
+  // 페이지 이탈 시 자동 저장 처리
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedChanges && projectId) {
+        // 작업이 있고 저장되지 않은 경우 자동 저장
+        autoSaveProject();
+        const message = '작업한 내용이 저장되지 않았습니다. 정말 나가시겠습니까?';
+        e.preventDefault();
+        e.returnValue = message;
+        return message;
+      }
+    };
+
+    const handleUnload = () => {
+      if (hasUnsavedChanges && projectId && navigator.sendBeacon) {
+        // 작업 저장
+        const panelsData = cuts.map((cut, index) => ({
+          id: cut.id,
+          prompt: cut.prompt,
+          imageUrl: cut.imageUrl,
+          generationId: cut.generationId,
+          editData: {
+            elements: cut.elements,
+            canvasRatio: canvasRatio,
+            selectedCharacters: selectedCharacters
+          }
+        }));
+        
+        const saveData = {
+          projectId,
+          projectName: initialData?.title,
+          panels: panelsData
+        };
+        const saveBlob = new Blob([JSON.stringify(saveData)], { type: 'application/json' });
+        navigator.sendBeacon('/api/studio/save-project', saveBlob);
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('unload', handleUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('unload', handleUnload);
+    };
+  }, [hasUnsavedChanges, cuts, canvasRatio, selectedCharacters, projectId, initialData]);
   
   const canvasAreaRef = useRef<HTMLDivElement>(null);
   const canvasRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
@@ -359,6 +581,27 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
     ));
   }, []);
 
+  // 요소가 속한 캔버스를 찾고 자동 이동하는 함수
+  const findElementCutAndSelect = useCallback((elementId: string) => {
+    // 모든 캔버스에서 해당 elementId를 가진 요소 찾기
+    for (const cut of cuts) {
+      const hasElement = cut.elements.some(element => element.id === elementId);
+      if (hasElement) {
+        // 해당 캔버스가 현재 선택된 캔버스가 아니라면 자동 이동
+        if (selectedCutId !== cut.id) {
+          console.log(`🎯 요소 ${elementId}가 캔버스 ${cut.id}에 있습니다. 자동 이동합니다.`);
+          setSelectedCutId(cut.id);
+          // 캔버스로 스크롤 이동
+          scrollToCanvas(cut.id);
+        }
+        // 요소 선택
+        setSelectedElementId(elementId);
+        return;
+      }
+    }
+    console.warn(`⚠️ 요소 ${elementId}를 어떤 캔버스에서도 찾을 수 없습니다.`);
+  }, [cuts, selectedCutId, setSelectedCutId, setSelectedElementId, scrollToCanvas]);
+
   // 캐릭터 관련 함수
   const handleCharacterToggle = (characterId: string) => {
     setSelectedCharacters(prev => 
@@ -382,22 +625,30 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
     const cut = cuts.find(c => c.id === cutId);
     if (!cut || !cut.prompt.trim()) return;
 
+    console.log('🎨 Generating image with projectId:', projectId, 'panelId:', cutId);
+
     setCuts(cuts.map(c => 
       c.id === cutId ? { ...c, isGenerating: true } : c
     ));
 
     try {
+      const requestBody = {
+        prompt: cut.prompt,
+        aspectRatio: canvasRatio,
+        style: 'webtoon',
+        characterIds: selectedCharacters, // 선택된 캐릭터 ID들 추가
+        projectId: projectId, // 프로젝트 ID 추가하여 DB에서 연결
+        panelId: cutId // 패널 ID도 추가
+      };
+      
+      console.log('📤 Sending request body:', requestBody);
+      
       const response = await fetch('/api/ai/generate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          prompt: cut.prompt,
-          aspectRatio: canvasRatio,
-          style: 'webtoon',
-          characterIds: selectedCharacters // 선택된 캐릭터 ID들 추가
-        })
+        body: JSON.stringify(requestBody)
       });
 
       if (!response.ok) {
@@ -410,27 +661,20 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
       
       setCuts(cuts.map(c => 
         c.id === cutId 
-          ? { ...c, imageUrl: result.imageUrl, isGenerating: false }
+          ? { 
+              ...c, 
+              imageUrl: result.imageUrl, 
+              generationId: result.generationId, // generationId 저장
+              isGenerating: false 
+            }
           : c
       ));
       
-      // 개발 모드에서 로컬 스토리지에 저장
-      if (process.env.NODE_ENV === 'development') {
-        const savedImages = localStorage.getItem('instatoon_generated_images');
-        const images = savedImages ? JSON.parse(savedImages) : [];
-        
-        const newImage = {
-          id: result.generationId || `img-${Date.now()}`,
-          imageUrl: result.imageUrl,
-          thumbnailUrl: result.thumbnailUrl || result.imageUrl,
-          prompt: cut.prompt,
-          createdAt: new Date().toISOString(),
-        };
-        
-        images.unshift(newImage);
-        localStorage.setItem('instatoon_generated_images', JSON.stringify(images.slice(0, 50))); // 최대 50개 저장
-        console.log('Image saved to local storage');
-      }
+      // 변경사항 있음 표시
+      setHasUnsavedChanges(true);
+      
+      // 이미지는 Supabase generation 테이블에 자동으로 저장됨
+      console.log('Image generated and saved to database with projectId:', projectId, 'generationId:', result.generationId);
     } catch (error) {
       console.error('Image generation failed:', error);
       const errorMessage = error instanceof Error ? error.message : '이미지 생성 실패';
@@ -462,7 +706,9 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
           style: 'webtoon',
           characterIds: selectedCharacters,
           referenceImage: cut.imageUrl, // 기존 이미지를 참조로 사용
-          editMode: true // 편집 모드 플래그
+          editMode: true, // 편집 모드 플래그
+          projectId: projectId, // 프로젝트 ID 추가
+          panelId: cutId // 패널 ID 추가
         })
       });
 
@@ -477,6 +723,9 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
           ? { ...c, imageUrl: result.imageUrl, isGenerating: false }
           : c
       ));
+      
+      // 변경사항 있음 표시
+      setHasUnsavedChanges(true);
     } catch (error) {
       console.error('Image edit failed:', error);
       alert(error instanceof Error ? error.message : "이미지 수정 중 오류가 발생했습니다.");
@@ -504,6 +753,76 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
     await editImage(editingCutId, editPrompt);
     setEditingCutId(null);
     setEditPrompt("");
+  };
+
+  // 프로젝트 저장 함수 (간소화)
+  const handleSaveProject = async () => {
+    if (!onSave) return;
+    
+    setIsSaving(true);
+    try {
+      const panelsData = cuts.map((cut, index) => ({
+        id: cut.id,
+        prompt: cut.prompt,
+        imageUrl: cut.imageUrl, // 클라이언트 표시용으로는 유지
+        generationId: cut.generationId, // DB 참조용 generationId 추가
+        editData: {
+          elements: cut.elements,
+          canvasRatio: canvasRatio,
+          selectedCharacters: selectedCharacters
+        }
+      }));
+      
+      await onSave(panelsData, initialData?.title);
+      setHasUnsavedChanges(false); // 저장 후 변경사항 플래그 리셋
+      console.log('프로젝트가 저장되었습니다');
+      
+      // 성공 알림 표시
+      setShowSaveSuccess(true);
+      setTimeout(() => setShowSaveSuccess(false), 3000);
+    } catch (error) {
+      console.error('저장 실패:', error);
+      alert('프로젝트 저장에 실패했습니다.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // 저장 유도 함수
+  const promptSaveBeforeLeaving = () => {
+    const hasUserActivity = cuts.some(cut => {
+      const hasPrompt = cut.prompt && cut.prompt.trim().length > 0;
+      const hasImage = cut.generationId || cut.imageUrl;
+      const hasElements = cut.elements && cut.elements.length > 0;
+      return hasPrompt || hasImage || hasElements;
+    });
+
+    if (hasUnsavedChanges && hasUserActivity) {
+      setSavePromptModalOpen(true);
+      return true; // 네비게이션 중단
+    }
+    return false; // 네비게이션 허용
+  };
+
+  // 자동 저장 함수 (페이지 이탈 시)
+  const autoSaveProject = async () => {
+    if (!onSave || !hasUnsavedChanges) return;
+    
+    const panelsData = cuts.map((cut, index) => ({
+      id: cut.id,
+      prompt: cut.prompt,
+      imageUrl: cut.imageUrl,
+      generationId: cut.generationId, // generationId 포함
+      editData: {
+        elements: cut.elements,
+        canvasRatio: canvasRatio,
+        selectedCharacters: selectedCharacters
+      }
+    }));
+    
+    await onSave(panelsData, initialData?.title);
+    setHasUnsavedChanges(false);
+    console.log('프로젝트가 자동 저장되었습니다');
   };
 
   // 요소 추가 함수
@@ -602,6 +921,11 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
     e.stopPropagation();
     e.preventDefault();
     
+    // 드래그 시작 상태 저장
+    if (!dragStartState) {
+      setDragStartState([...cuts]);
+    }
+    
     setIsResizing(true);
     setResizeHandle(handle);
     
@@ -673,8 +997,8 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
       newX = Math.max(0, Math.min(newX, maxX));
       newY = Math.max(0, Math.min(newY, maxY));
       
-      // 요소 업데이트
-      setCuts(prevCuts => prevCuts.map(cut => ({
+      // 요소 업데이트 (리사이즈 중 실시간 업데이트)
+      setCuts(cuts.map(cut => ({
         ...cut,
         elements: cut.elements.map(el => 
           el.id === elementId 
@@ -685,8 +1009,8 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
     };
     
     const handleMouseUp = () => {
-      setIsResizing(false);
-      setResizeHandle(null);
+      // 리사이즈 완료 시 변경사항 커밋
+      commitDrag();
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
@@ -696,8 +1020,12 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
   };
 
   const deleteElement = (elementId: string) => {
+    // 모든 캔버스에서 해당 요소를 찾아서 삭제
     setCuts(cuts.map(cut => {
-      if (cut.id !== selectedCutId) return cut;
+      const hasElement = cut.elements.some(el => el.id === elementId);
+      if (!hasElement) return cut;
+      
+      // 해당 요소가 있는 캔버스에서 요소 삭제
       return {
         ...cut,
         elements: cut.elements.filter(el => el.id !== elementId)
@@ -707,8 +1035,11 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
   };
 
   const updateElementContent = (elementId: string, content: string) => {
+    // 모든 캔버스에서 해당 요소를 찾아서 업데이트
     setCuts(cuts.map(cut => {
-      if (cut.id !== selectedCutId) return cut;
+      const hasElement = cut.elements.some(el => el.id === elementId);
+      if (!hasElement) return cut;
+      
       return {
         ...cut,
         elements: cut.elements.map(el => 
@@ -718,9 +1049,49 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
     }));
   };
 
+  // 범용 요소 속성 업데이트 함수
+  const updateElementProperty = useCallback((elementId: string, properties: Partial<CanvasElement>) => {
+    setCuts(cuts => cuts.map(cut => {
+      const hasElement = cut.elements.some(el => el.id === elementId);
+      if (!hasElement) return cut;
+      
+      return {
+        ...cut,
+        elements: cut.elements.map(el => 
+          el.id === elementId ? { ...el, ...properties } : el
+        )
+      };
+    }));
+  }, []);
+
+  // 생성된 이미지 삭제 함수
+  const deleteGeneratedImage = (cutId: string) => {
+    // 확인 다이얼로그
+    if (window.confirm('정말로 생성된 이미지를 삭제하시겠습니까?\n삭제된 이미지는 복구할 수 없습니다.')) {
+      setCuts(cuts.map(cut => 
+        cut.id === cutId 
+          ? { ...cut, imageUrl: undefined, generationId: undefined }
+          : cut
+      ));
+      
+      // 성공 피드백 (선택사항)
+      console.log('✅ 이미지가 삭제되었습니다.');
+    }
+  };
+
   // 프로젝트 저장 함수
   const handleSave = async () => {
     if (!onSave) return;
+    
+    // 빈 캔버스 체크
+    const hasContent = cuts.some(cut => {
+      return cut.imageUrl || (cut.elements && cut.elements.length > 0) || cut.prompt?.trim();
+    });
+    
+    if (!hasContent) {
+      console.log('빈 캔버스 - 저장 건너뛰기');
+      return;
+    }
     
     setIsSaving(true);
     try {
@@ -741,6 +1112,107 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
       console.error('저장 실패:', error);
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  // 캔버스 다운로드 함수
+  const downloadCanvas = async (cutId: string) => {
+    const cut = cuts.find(c => c.id === cutId);
+    if (!cut) return;
+
+    try {
+      // Canvas 생성
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      // 캔버스 크기 설정 (고해상도)
+      const canvasSize = CANVAS_SIZES[canvasRatio];
+      canvas.width = canvasSize.actualWidth;
+      canvas.height = canvasSize.actualHeight;
+
+      // 배경색 설정
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // 배경 이미지가 있으면 그리기
+      if (cut.imageUrl) {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        
+        await new Promise((resolve, reject) => {
+          img.onload = () => {
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            resolve(null);
+          };
+          img.onerror = reject;
+          img.src = cut.imageUrl!;
+        });
+      }
+
+      // 요소들 그리기
+      for (const element of cut.elements) {
+        const scaleX = canvas.width / canvasSize.width;
+        const scaleY = canvas.height / canvasSize.height;
+        
+        const x = element.x * scaleX;
+        const y = element.y * scaleY;
+        const width = element.width * scaleX;
+        const height = element.height * scaleY;
+
+        if (element.type === 'text') {
+          // 텍스트 그리기
+          ctx.save();
+          ctx.fillStyle = element.color || '#000000';
+          ctx.font = `${(element.fontSize || 14) * scaleX}px Arial, sans-serif`;
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'top';
+          
+          const lines = (element.content || '').split('\n');
+          const lineHeight = (element.fontSize || 14) * scaleX * 1.2;
+          
+          lines.forEach((line, index) => {
+            ctx.fillText(line, x, y + (index * lineHeight));
+          });
+          ctx.restore();
+        } else if (element.type === 'bubble') {
+          // 말풍선 그리기 (간단한 원형/타원)
+          ctx.save();
+          ctx.fillStyle = element.fillColor || '#ffffff';
+          ctx.strokeStyle = element.strokeColor || '#333333';
+          ctx.lineWidth = (element.strokeWidth || 2) * scaleX;
+          
+          ctx.beginPath();
+          ctx.ellipse(x + width/2, y + height/2, width/2, height/2, 0, 0, 2 * Math.PI);
+          ctx.fill();
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+
+      // 다운로드
+      const link = document.createElement('a');
+      link.download = `웹툰-패널-${cuts.findIndex(c => c.id === cutId) + 1}.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+
+    } catch (error) {
+      console.error('다운로드 실패:', error);
+      alert('다운로드 중 오류가 발생했습니다.');
+    }
+  };
+
+  // 전체 웹툰 다운로드 함수
+  const downloadAllCanvases = async () => {
+    try {
+      // JSZip 라이브러리가 필요하지만, 우선 개별 다운로드로 구현
+      for (let i = 0; i < cuts.length; i++) {
+        await new Promise(resolve => setTimeout(resolve, 500)); // 0.5초 간격
+        await downloadCanvas(cuts[i].id);
+      }
+    } catch (error) {
+      console.error('전체 다운로드 실패:', error);
+      alert('전체 다운로드 중 오류가 발생했습니다.');
     }
   };
 
@@ -798,6 +1270,28 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
             <span className="text-2xl font-bold">인스타툰</span>
           </a>
           
+          {/* 프로젝트 저장 버튼 - 추가 */}
+          <Button
+            onClick={handleSaveProject}
+            disabled={isSaving}
+            className={cn(
+              "bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white transition-all duration-200",
+              hasUnsavedChanges && "animate-pulse shadow-lg shadow-purple-500/50 ring-2 ring-purple-300"
+            )}
+          >
+            {isSaving ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                저장 중...
+              </>
+            ) : (
+              <>
+                <Save className="h-4 w-4 mr-2" />
+                프로젝트 저장
+              </>
+            )}
+          </Button>
+          
           {/* 캔버스 크기 선택 */}
           <div className="flex items-center bg-slate-100">
             <button
@@ -826,16 +1320,53 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
               <span>{CANVAS_SIZES['1:1'].label}</span>
               <span className="text-xs text-slate-400">{CANVAS_SIZES['1:1'].actualWidth}×{CANVAS_SIZES['1:1'].actualHeight}</span>
             </button>
+            <button
+              className={cn(
+                "flex items-center gap-2 px-4 py-2 transition-all text-sm font-medium",
+                canvasRatio === '16:9' 
+                  ? "bg-white shadow-sm text-purple-600 border border-purple-200" 
+                  : "text-slate-600 hover:text-slate-900"
+              )}
+              onClick={() => setCanvasRatio('16:9')}
+            >
+              <Square className="h-4 w-4 rotate-90" />
+              <span>{CANVAS_SIZES['16:9'].label}</span>
+              <span className="text-xs text-slate-400">{CANVAS_SIZES['16:9'].actualWidth}×{CANVAS_SIZES['16:9'].actualHeight}</span>
+            </button>
           </div>
         </div>
 
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1">
-            <Button variant="ghost" size="sm" className="h-9 w-9 p-0">
-              <Undo className="h-4 w-4" />
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className="h-9 w-9 p-0 relative group"
+              onClick={undo}
+              disabled={!canUndo}
+              title="실행 취소 (Ctrl+Z)"
+            >
+              <Undo className={cn("h-4 w-4", canUndo ? "text-slate-700" : "text-slate-300")} />
+              {canUndo && (
+                <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-xs bg-slate-800 text-white px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                  실행 취소
+                </span>
+              )}
             </Button>
-            <Button variant="ghost" size="sm" className="h-9 w-9 p-0">
-              <Redo className="h-4 w-4" />
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className="h-9 w-9 p-0 relative group"
+              onClick={redo}
+              disabled={!canRedo}
+              title="다시 실행 (Ctrl+Y)"
+            >
+              <Redo className={cn("h-4 w-4", canRedo ? "text-slate-700" : "text-slate-300")} />
+              {canRedo && (
+                <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-xs bg-slate-800 text-white px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                  다시 실행
+                </span>
+              )}
             </Button>
           </div>
           <div className="w-px h-6 bg-slate-200" />
@@ -858,7 +1389,11 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
               </>
             )}
           </Button>
-          <Button className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 h-9 px-4" size="sm">
+          <Button 
+            className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 h-9 px-4" 
+            size="sm"
+            onClick={downloadAllCanvases}
+          >
             <Download className="h-4 w-4 mr-2" />
             다운로드
           </Button>
@@ -937,15 +1472,7 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
                               <Textarea 
                                 value={element.content || ''}
                                 onChange={(e) => {
-                                  const newValue = e.target.value;
-                                  setCuts(cuts.map(cut => ({
-                                    ...cut,
-                                    elements: cut.elements.map(el => 
-                                      el.id === selectedElementId 
-                                        ? { ...el, content: newValue }
-                                        : el
-                                    )
-                                  })));
+                                  updateElementProperty(selectedElementId!, { content: e.target.value });
                                 }}
                                 placeholder="텍스트를 입력하세요..."
                                 className="min-h-[60px] text-sm resize-none border-slate-200"
@@ -960,14 +1487,7 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
                               <Slider
                                 value={[element.fontSize || 14]}
                                 onValueChange={(value) => {
-                                  setCuts(cuts.map(cut => ({
-                                    ...cut,
-                                    elements: cut.elements.map(el => 
-                                      el.id === selectedElementId 
-                                        ? { ...el, fontSize: value[0] }
-                                        : el
-                                    )
-                                  })));
+                                  updateElementProperty(selectedElementId!, { fontSize: value[0] });
                                 }}
                                 max={32}
                                 min={8}
@@ -986,28 +1506,14 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
                               type="color"
                               value={element.color}
                               onChange={(e) => {
-                                setCuts(cuts.map(cut => ({
-                                  ...cut,
-                                  elements: cut.elements.map(el => 
-                                    el.id === selectedElementId 
-                                      ? { ...el, color: e.target.value }
-                                      : el
-                                  )
-                                })));
+                                updateElementProperty(selectedElementId!, { color: e.target.value });
                               }}
                               className="w-10 h-8 rounded border border-slate-300 cursor-pointer"
                             />
                             <Input
                               value={element.color}
                               onChange={(e) => {
-                                setCuts(cuts.map(cut => ({
-                                  ...cut,
-                                  elements: cut.elements.map(el => 
-                                    el.id === selectedElementId 
-                                      ? { ...el, color: e.target.value }
-                                      : el
-                                  )
-                                })));
+                                updateElementProperty(selectedElementId!, { color: e.target.value });
                               }}
                               className="text-sm font-mono"
                             />
@@ -1392,6 +1898,18 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
 
                     {/* 캠버스 상단 컨트롤 버튼들 - 미리캠버스 스타일 */}
                     <div className="absolute -top-10 left-1/2 transform -translate-x-1/2 flex items-center gap-1">
+                      {/* 개별 다운로드 */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          downloadCanvas(cut.id);
+                        }}
+                        className="w-7 h-7 bg-white border border-green-300 hover:bg-green-50 text-green-600 flex items-center justify-center rounded shadow-sm transition-colors"
+                        title="이 패널 다운로드"
+                      >
+                        <Download className="h-3 w-3" />
+                      </button>
+                      
                       {/* 위로 이동 */}
                       <button
                         onClick={(e) => {
@@ -1535,7 +2053,8 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
                             selectedElementId === element.id 
                               ? "border-purple-500 shadow-lg" 
                               : "border-transparent hover:border-purple-300",
-                            isDraggingElement && draggedElement?.id === element.id && "z-50"
+                            isDraggingElement && draggedElement?.id === element.id && "z-50",
+                            element.isHiddenWhileDragging && "opacity-0 pointer-events-none"
                           )}
                           style={{
                             left: `${(element.x / CANVAS_SIZES[canvasRatio].width) * 100}%`,
@@ -1545,15 +2064,17 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
                           }}
                           onClick={(e) => {
                             e.stopPropagation();
-                            setSelectedElementId(element.id);
+                            findElementCutAndSelect(element.id);
                           }}
                           onMouseDown={(e) => {
                             e.stopPropagation();
+                                                        
+                            // 즉시 선택 및 드래그 시작 - UX 개선
+                            findElementCutAndSelect(element.id);
                             
-                            // 선택된 요소만 드래그 가능
-                            if (selectedElementId !== element.id) {
-                              setSelectedElementId(element.id);
-                              return;
+                            // 드래그 시작 상태 저장
+                            if (!dragStartState) {
+                              setDragStartState([...cuts]);
                             }
                             
                             const rect = e.currentTarget.getBoundingClientRect();
@@ -1567,11 +2088,62 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
                               offsetY 
                             });
                             
+                            let dragStarted = false;
+                            const startX = e.clientX;
+                            const startY = e.clientY;
+                            let currentCutId = cut.id; // 현재 요소가 속한 캔버스 ID 추적
+                            
                             const handleMouseMove = (moveEvent: MouseEvent) => {
-                              const canvas = canvasRefs.current[selectedCutId];
-                              if (!canvas) return;
+                                                            
+                              // 최소 이동 거리로 드래그 시작 감지
+                              if (!dragStarted) {
+                                const distance = Math.sqrt(
+                                  Math.pow(moveEvent.clientX - startX, 2) + 
+                                  Math.pow(moveEvent.clientY - startY, 2)
+                                );
+                                if (distance < 3) return; // 3px 이하면 드래그로 인식하지 않음
+                                                                dragStarted = true;
+                              }
                               
-                              const canvasRect = canvas.getBoundingClientRect();
+                              // 현재 마우스 위치에서 어느 캔버스 위에 있는지 확인
+                              let targetCutId = null;
+                              let targetCanvas = null;
+                              let isOverCanvas = false;
+                              
+                              // 모든 캔버스를 확인하여 마우스가 어느 캔버스 위에 있는지 찾기
+                              for (const cutId of Object.keys(canvasRefs.current)) {
+                                const canvas = canvasRefs.current[cutId];
+                                if (canvas) {
+                                  const rect = canvas.getBoundingClientRect();
+                                  if (moveEvent.clientX >= rect.left && 
+                                      moveEvent.clientX <= rect.right && 
+                                      moveEvent.clientY >= rect.top && 
+                                      moveEvent.clientY <= rect.bottom) {
+                                    targetCutId = cutId;
+                                    targetCanvas = canvas;
+                                    isOverCanvas = true;
+                                    break;
+                                  }
+                                }
+                              }
+                              
+                              // 미리캔버스식 끊김 효과: 캔버스 외부에서는 요소를 숨김
+                              if (!isOverCanvas) {
+                                // 캔버스 외부에서는 요소를 임시로 숨김
+                                setCuts(cuts.map(c => ({
+                                  ...c,
+                                  elements: c.elements.map(el => 
+                                    el.id === element.id 
+                                      ? { ...el, isHiddenWhileDragging: true }
+                                      : el
+                                  )
+                                })));
+                                return;
+                              }
+                              
+                              if (!targetCanvas || !targetCutId) return;
+                              
+                              const canvasRect = targetCanvas.getBoundingClientRect();
                               const scaledWidth = CANVAS_SIZES[canvasRatio].width * (zoom / 100);
                               const scaledHeight = CANVAS_SIZES[canvasRatio].height * (zoom / 100);
                               
@@ -1583,26 +2155,91 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
                               const constrainedX = Math.max(0, Math.min(canvasX, CANVAS_SIZES[canvasRatio].width - element.width));
                               const constrainedY = Math.max(0, Math.min(canvasY, CANVAS_SIZES[canvasRatio].height - element.height));
                               
-                              // 요소 위치 업데이트
-                              setCuts(prevCuts => prevCuts.map(cut => ({
-                                ...cut,
-                                elements: cut.elements.map(el => 
-                                  el.id === element.id 
-                                    ? { ...el, x: constrainedX, y: constrainedY }
-                                    : el
-                                )
-                              })));
+                              // 캔버스가 바뀌었는지 확인
+                              if (targetCutId !== currentCutId) {
+                                // 캔버스 간 이동
+                                let movingElement = null;
+                                let updatedCuts = cuts.map(c => {
+                                  if (c.id === currentCutId) {
+                                    // 현재 캔버스에서 요소 찾기
+                                    const foundElement = c.elements.find(el => el.id === element.id);
+                                    if (foundElement) {
+                                      movingElement = foundElement;
+                                      // 현재 캔버스에서 제거
+                                      return {
+                                        ...c,
+                                        elements: c.elements.filter(el => el.id !== element.id)
+                                      };
+                                    }
+                                  }
+                                  return c;
+                                });
+                                
+                                // 새 캔버스에 추가
+                                if (movingElement) {
+                                  updatedCuts = updatedCuts.map(c => {
+                                    if (c.id === targetCutId) {
+                                      // 중복 방지: 이미 같은 ID의 요소가 있는지 확인
+                                      const alreadyExists = c.elements.some(el => el.id === element.id);
+                                      if (!alreadyExists) {
+                                        return {
+                                          ...c,
+                                          elements: [...c.elements, {
+                                            ...movingElement,
+                                            x: constrainedX,
+                                            y: constrainedY,
+                                            isHiddenWhileDragging: false
+                                          }]
+                                        };
+                                      }
+                                    }
+                                    return c;
+                                  });
+                                }
+                                
+                                setCuts(updatedCuts);
+                                
+                                // 현재 캔버스 ID 업데이트
+                                currentCutId = targetCutId;
+                                // 선택된 캔버스도 업데이트
+                                setSelectedCutId(targetCutId);
+                              } else {
+                                // 같은 캔버스 내에서 이동 - 실시간 업데이트
+                                setCuts(cuts.map(c => ({
+                                  ...c,
+                                  elements: c.elements.map(el => 
+                                    el.id === element.id 
+                                      ? { ...el, x: constrainedX, y: constrainedY, isHiddenWhileDragging: false }
+                                      : el
+                                  )
+                                })));
+                              }
                             };
                             
-                            const handleMouseUp = () => {
-                              setIsDraggingElement(false);
-                              setDraggedElement(null);
+                            const cleanup = () => {
                               document.removeEventListener('mousemove', handleMouseMove);
                               document.removeEventListener('mouseup', handleMouseUp);
+                              window.removeEventListener('mouseup', handleMouseUp);
+                              document.removeEventListener('mouseleave', handleMouseUp);
                             };
                             
-                            document.addEventListener('mousemove', handleMouseMove);
+                            // 드래그 타임아웃 설정 (5초 후 자동 종료)
+                            const dragTimeout = setTimeout(() => {
+                              commitDrag();
+                              cleanup();
+                            }, 5000);
+                            
+                            const handleMouseUp = () => {
+                              // 드래그 완료 시 변경사항 커밋
+                              clearTimeout(dragTimeout);
+                              commitDrag();
+                              cleanup();
+                            };
+                            
+                                                        document.addEventListener('mousemove', handleMouseMove);
                             document.addEventListener('mouseup', handleMouseUp);
+                            window.addEventListener('mouseup', handleMouseUp); // window 레벨에서도 캐치
+                            document.addEventListener('mouseleave', handleMouseUp); // 마우스가 페이지를 벗어날 때도 처리
                           }}
                         >
                           {element.type === 'text' ? (
@@ -1896,15 +2533,7 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
                           value={selectedElement.fontSize}
                           onChange={(e) => {
                             const newSize = parseInt(e.target.value) || 12;
-                            setCuts(cuts.map(cut => {
-                              if (cut.id !== selectedCutId) return cut;
-                              return {
-                                ...cut,
-                                elements: cut.elements.map(el =>
-                                  el.id === selectedElement.id ? { ...el, fontSize: newSize } : el
-                                )
-                              };
-                            }));
+                            updateElementProperty(selectedElement.id, { fontSize: newSize });
                           }}
                           className="text-sm border-slate-200"
                           min="8"
@@ -1917,15 +2546,7 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
                           type="color"
                           value={selectedElement.color}
                           onChange={(e) => {
-                            setCuts(cuts.map(cut => {
-                              if (cut.id !== selectedCutId) return cut;
-                              return {
-                                ...cut,
-                                elements: cut.elements.map(el =>
-                                  el.id === selectedElement.id ? { ...el, color: e.target.value } : el
-                                )
-                              };
-                            }));
+                            updateElementProperty(selectedElement.id, { color: e.target.value });
                           }}
                           className="h-8 border-slate-200"
                         />
@@ -1946,43 +2567,58 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
 
                 {selectedCut.imageUrl && (
                   <div className="space-y-3 pt-4 border-t border-slate-200">
-                    <p className="text-sm font-medium text-slate-700">생성된 이미지</p>
-                    <div className="aspect-square bg-slate-100 overflow-hidden">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium text-slate-700">생성된 이미지</p>
+                      {/* 삭제 버튼 - 우상단 */}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0 text-slate-400 hover:text-red-500 hover:bg-red-50"
+                        onClick={() => deleteGeneratedImage(selectedCut.id)}
+                        title="이미지 삭제"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
+                    <div className="relative aspect-square bg-slate-100 overflow-hidden rounded-lg border border-slate-200">
                       <img 
                         src={selectedCut.imageUrl} 
                         alt="생성된 이미지"
                         className="w-full h-full object-cover"
                       />
                     </div>
-                    <div className="flex gap-2">
+                    <div className="grid grid-cols-2 gap-2">
                       <Button 
                         variant="outline" 
                         size="sm" 
-                        className="flex-1"
                         onClick={() => generateImage(selectedCut.id)}
                         disabled={selectedCut.isGenerating}
                       >
                         {selectedCut.isGenerating ? (
                           <>
-                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            <Loader2 className="h-4 w-4 mr-1 animate-spin" />
                             재생성 중...
                           </>
                         ) : (
-                          '재생성'
+                          <>
+                            <Sparkles className="h-4 w-4 mr-1" />
+                            재생성
+                          </>
                         )}
                       </Button>
                       <Button 
                         size="sm" 
-                        className="flex-1 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700"
+                        className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700"
                         onClick={() => handleEditImage(selectedCut.id)}
                         disabled={selectedCut.isGenerating}
                       >
-                        <Edit3 className="h-4 w-4 mr-2" />
-                        수정하기
+                        <Edit3 className="h-4 w-4 mr-1" />
+                        수정
                       </Button>
                     </div>
                   </div>
                 )}
+
               </div>
             )}
           </div>
@@ -2036,7 +2672,60 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
         open={addCharacterModalOpen}
         onOpenChange={setAddCharacterModalOpen}
         onCharacterAdded={handleCharacterAdded}
+        canvasRatio={canvasRatio}
       />
+
+      {/* 저장 유도 모달 */}
+      <Dialog open={savePromptModalOpen} onOpenChange={setSavePromptModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Save className="h-5 w-5 text-purple-600" />
+              작업 저장
+            </DialogTitle>
+            <DialogDescription>
+              작업한 내용을 저장하시겠습니까?<br />
+              저장하지 않으면 변경사항이 사라질 수 있습니다.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex gap-2 justify-end">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setSavePromptModalOpen(false);
+                if (pendingNavigation) {
+                  pendingNavigation();
+                  setPendingNavigation(null);
+                }
+              }}
+            >
+              저장하지 않고 나가기
+            </Button>
+            <Button
+              onClick={async () => {
+                setSavePromptModalOpen(false);
+                await handleSaveProject();
+                if (pendingNavigation) {
+                  pendingNavigation();
+                  setPendingNavigation(null);
+                }
+              }}
+              className="bg-purple-600 hover:bg-purple-700"
+            >
+              <Save className="h-4 w-4 mr-2" />
+              저장하고 나가기
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* 저장 성공 알림 */}
+      {showSaveSuccess && (
+        <div className="fixed top-4 right-4 z-50 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 animate-in slide-in-from-right-4">
+          <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
+          <span className="font-medium">프로젝트가 저장되었습니다!</span>
+        </div>
+      )}
     </div>
   );
 }

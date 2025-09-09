@@ -1,5 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { characterReferenceManager } from "./character-reference-manager";
+import { resizeImageUrlToRatio, CANVAS_RATIOS } from "@/lib/utils/image-resize";
+import { generateOptimizedPrompt, getRecommendedDimensions, getInternalRatioMetadata, type AspectRatio } from "./prompt-templates";
 
 /**
  * Nano Banana (Gemini 2.5 Flash) Service
@@ -34,11 +36,12 @@ export class NanoBananaService {
     prompt: string, 
     options?: {
       userId?: string;
+      selectedCharacterIds?: string[];
       referenceImages?: string[];
       characterDescriptions?: Map<string, string>;
       style?: string;
       negativePrompt?: string;
-      aspectRatio?: '4:5' | '1:1';
+      aspectRatio?: '4:5' | '1:1' | '16:9';
       width?: number;
       height?: number;
     }
@@ -58,32 +61,49 @@ export class NanoBananaService {
       let additionalReferenceImages: string[] = [];
       let detectedCharacterNames: string[] = [];
       
-      if (options?.userId && process.env.NODE_ENV !== 'development') {
-        // 프로덕션 모드에서만 캐릭터 매니저 사용
+      if (options?.userId) {
+        // 개발 모드와 프로덕션 모드 모두에서 캐릭터 매니저 사용
         try {
-          const enhancement = await characterReferenceManager.enhancePromptWithCharacters(
-            options.userId,
-            prompt
-          );
+          let enhancement;
+          
+          // 선택된 캐릭터 ID가 있는 경우 우선 처리
+          if (options.selectedCharacterIds && options.selectedCharacterIds.length > 0) {
+            console.log(`🎯 선택된 캐릭터 사용: [${options.selectedCharacterIds.join(', ')}]`);
+            enhancement = await characterReferenceManager.enhancePromptWithSelectedCharacters(
+              options.userId,
+              prompt,
+              options.selectedCharacterIds
+            );
+          } else {
+            // 선택된 캐릭터가 없으면 자동 감지
+            console.log('🔍 캐릭터 자동 감지 모드');
+            enhancement = await characterReferenceManager.enhancePromptWithCharacters(
+              options.userId,
+              prompt
+            );
+          }
           
           enhancedPrompt = enhancement.enhancedPrompt;
           characterDescriptions = enhancement.characterDescriptions;
           additionalReferenceImages = enhancement.referenceImages;
           detectedCharacterNames = enhancement.detectedCharacters.map(c => c.name);
           
-          // 감지된 캐릭터 사용 기록
+          console.log(`🎭 사용된 캐릭터: ${detectedCharacterNames.length}개 (${detectedCharacterNames.join(', ')})`);
+          console.log(`🖼️ 추가된 참조 이미지: ${additionalReferenceImages.length}개`);
+          
+          // 캐릭터 사용 기록
           if (enhancement.detectedCharacters.length > 0) {
             await characterReferenceManager.recordCharacterUsage(
               enhancement.detectedCharacters.map(c => c.id)
             );
           }
         } catch (error) {
-          console.error("Character enhancement error in production:", error);
+          console.error("Character enhancement error:", error);
           // 캐릭터 관리자 오류가 있어도 이미지 생성은 계속 진행
+          if (process.env.NODE_ENV === 'development') {
+            console.warn("개발 모드: 캐릭터 참조 관리자 오류 발생하여 기본 프롬프트로 진행");
+          }
         }
-      } else if (options?.userId && process.env.NODE_ENV === 'development') {
-        // 개발 모드: 캐릭터 매니저 우회
-        console.log("Development mode: Skipping character reference manager");
       }
       
       // 2. Nano Banana 최적화 프롬프트 생성
@@ -108,9 +128,14 @@ export class NanoBananaService {
       ];
       
       if (allReferenceImages.length > 0) {
+        // 캔버스 비율에 맞는 타겟 비율 결정
+        const targetRatio = options?.aspectRatio === '16:9' ? CANVAS_RATIOS.LANDSCAPE :
+                           options?.aspectRatio === '1:1' ? CANVAS_RATIOS.SQUARE : 
+                           CANVAS_RATIOS.PORTRAIT;
+        
         for (const imageUrl of allReferenceImages.slice(0, 5)) { // 최대 5개
           try {
-            const imageData = await this.fetchImageAsBase64(imageUrl);
+            const imageData = await this.fetchImageAsBase64(imageUrl, targetRatio);
             parts.push({
               inlineData: {
                 mimeType: "image/jpeg",
@@ -123,24 +148,55 @@ export class NanoBananaService {
         }
       }
       
-      // 4. Gemini 2.5 Flash Image (나노바나나)로 직접 이미지 생성 - 공식 API 방식
-      const finalPrompt = `Create a professional Korean webtoon panel image with the following specifications:
+      // 4. 비율 최적화된 프롬프트 생성 (새로운 템플릿 시스템)
+      const aspectRatio: AspectRatio = (options?.aspectRatio || '4:5') as AspectRatio;
+      
+      // 추천 치수 또는 사용자 지정 치수 사용
+      const recommendedDimensions = getRecommendedDimensions(aspectRatio);
+      const width = options?.width || recommendedDimensions.width;
+      const height = options?.height || recommendedDimensions.height;
+      
+      // 내부 비율 최적화 시스템 (사용자 비노출)
+      const ratioMetadata = getInternalRatioMetadata(aspectRatio);
+      console.log(`🔧 Internal ratio optimization: ${aspectRatio} (${width}x${height}) - ${ratioMetadata.formatName}`);
+      
+      // 캐릭터 참조 지시사항 준비
+      let characterInstructions = '';
+      if (allReferenceImages.length > 0) {
+        characterInstructions = `Reference images are provided to maintain character consistency.
+Preserve the character's visual features, facial structure, and style exactly.
+Adapt the character to the new scene while keeping their identity intact.
+Ensure the character's appearance matches the reference images precisely.`;
+      }
+      
+      // 완벽한 비율 최적화 프롬프트 생성
+      const finalPrompt = generateOptimizedPrompt({
+        aspectRatio,
+        userPrompt: enhancedPrompt,
+        characterInstructions: characterInstructions || undefined,
+        width,
+        height
+      });
 
-${optimizedPrompt}
+      // 텍스트 프롬프트를 첫 번째 요소로 업데이트
+      parts[0] = { text: finalPrompt };
 
-TECHNICAL REQUIREMENTS:
-- Aspect ratio: ${options?.aspectRatio || '4:5'}
-- Recommended size: ${options?.width || 800}x${options?.height || 1000} pixels
-- Style: High-quality digital illustration suitable for Instagram webtoon
-- Colors: Vibrant and eye-catching
-- Composition: Clear focal point with balanced layout
-- Text: NO TEXT OR SPEECH BUBBLES in the image
-
-Please generate a single, high-quality webtoon panel that matches these requirements.`;
+      console.log(`🎨 AI Image Generation Started`);
+      console.log(`🔧 Auto-optimized for ${aspectRatio} ratio with ${allReferenceImages.length} reference images`);
+      // 상세 프롬프트는 개발 환경에서만 출력
+      if (process.env.NODE_ENV === 'development') {
+        console.log('📝 Optimized Prompt (Dev Only):', finalPrompt.substring(0, 200) + '...');
+      }
 
       const result = await this.genAI.models.generateContent({
         model: "gemini-2.5-flash-image-preview",
-        contents: finalPrompt
+        contents: [{ parts }], // parts 배열을 contents로 전달
+        generationConfig: {
+          temperature: 0.4, // 일관성과 비율 준수를 위해 낮은 온도
+          topK: 32,
+          topP: 0.9,
+          maxOutputTokens: 2048
+        }
       });
 
       // 5. 생성된 이미지 데이터 추출
@@ -234,10 +290,10 @@ Please generate a single, high-quality webtoon panel that matches these requirem
         `
       }];
       
-      // 캐릭터 이미지 추가
+      // 캐릭터 이미지 추가 (4:5 비율로 조정)
       for (const imageUrl of characterImages) {
         try {
-          const imageData = await this.fetchImageAsBase64(imageUrl);
+          const imageData = await this.fetchImageAsBase64(imageUrl, CANVAS_RATIOS.PORTRAIT);
           parts.push({
             inlineData: {
               mimeType: "image/jpeg",
@@ -347,17 +403,40 @@ ${options.negativePrompt}
   }
   
   /**
-   * 이미지를 Base64로 변환
+   * 이미지를 지정된 비율로 조정하여 Base64로 변환
+   * Gemini 2.5 Flash가 참조 이미지 비율을 그대로 유지하므로 미리 조정
    */
-  private async fetchImageAsBase64(imageUrl: string): Promise<string> {
+  private async fetchImageAsBase64(imageUrl: string, targetRatio = CANVAS_RATIOS.PORTRAIT): Promise<string> {
     try {
-      const response = await fetch(imageUrl);
-      const arrayBuffer = await response.arrayBuffer();
+      // 비율에 따른 최대 너비 결정
+      const maxWidth = targetRatio === CANVAS_RATIOS.LANDSCAPE ? 1920 : 1080;
+      
+      // 1. 이미지를 지정된 비율로 조정 (흰색 배경 추가)
+      const resizedBlob = await resizeImageUrlToRatio(imageUrl, {
+        targetRatio: targetRatio,
+        backgroundColor: 'white',
+        maxWidth: maxWidth,
+        quality: 0.9
+      });
+      
+      // 2. Blob을 Base64로 변환
+      const arrayBuffer = await resizedBlob.arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
+      
       return buffer.toString('base64');
     } catch (error) {
-      console.error("Failed to fetch image:", error);
-      throw error;
+      console.error("Failed to fetch and resize image:", error);
+      
+      // 폴백: 원본 이미지를 그대로 사용
+      try {
+        const response = await fetch(imageUrl);
+        const arrayBuffer = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        return buffer.toString('base64');
+      } catch (fallbackError) {
+        console.error("Fallback image fetch also failed:", fallbackError);
+        throw fallbackError;
+      }
     }
   }
   

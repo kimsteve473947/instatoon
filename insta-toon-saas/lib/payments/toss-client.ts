@@ -18,37 +18,28 @@ export const SUBSCRIPTION_PLANS = {
     id: "FREE" as const,
     name: "무료",
     price: 0,
-    tokens: 10,       // 5이미지/월
-    characters: 1,
+    tokens: 10,       // 10 토큰
+    characters: 2,
     projects: 3,
     description: "무료 체험용 플랜",
   },
-  PERSONAL: {
-    id: "PERSONAL" as const,
-    name: "개인",
+  PRO: {
+    id: "PRO" as const,
+    name: "프로",
     price: 30000,
-    tokens: 6000,     // 3000이미지/월 (10원/이미지)
+    tokens: 500000,   // 50만 토큰
     characters: 3,
     projects: 999,
     description: "개인 창작자를 위한 플랜",
   },
-  HEAVY: {
-    id: "HEAVY" as const,
-    name: "헤비유저",
+  PREMIUM: {
+    id: "PREMIUM" as const,
+    name: "프리미엄",
     price: 100000,
-    tokens: 25000,    // 12500이미지/월 (8원/이미지)
+    tokens: 2000000,  // 200만 토큰
     characters: 5,
     projects: 999,
     description: "전문 창작자를 위한 플랜",
-  },
-  ENTERPRISE: {
-    id: "ENTERPRISE" as const,
-    name: "기업",
-    price: 200000,
-    tokens: 60000,    // 30000이미지/월 (6.7원/이미지)
-    characters: 10,
-    projects: 999,
-    description: "기업 및 팀을 위한 플랜",
   },
 };
 

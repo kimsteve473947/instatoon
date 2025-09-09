@@ -22,11 +22,13 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createBrowserClient } from '@supabase/ssr';
+import { resizeImageToRatio, CANVAS_RATIOS } from '@/lib/utils/image-resize';
 
 interface AddCharacterModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCharacterAdded?: () => void;
+  canvasRatio?: '4:5' | '1:1' | '16:9'; // 현재 캔버스 비율
 }
 
 type CreationMode = 'upload' | 'ai' | null;
@@ -34,7 +36,8 @@ type CreationMode = 'upload' | 'ai' | null;
 export function AddCharacterModal({ 
   open, 
   onOpenChange, 
-  onCharacterAdded 
+  onCharacterAdded,
+  canvasRatio = '4:5' // 기본값 4:5
 }: AddCharacterModalProps) {
   const [mode, setMode] = useState<CreationMode>(null);
   const [name, setName] = useState('');
@@ -69,8 +72,8 @@ export function AddCharacterModal({
     }
   };
 
-  // 파일 업로드 처리
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // 파일 업로드 처리 (비율 조정 포함)
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -86,16 +89,52 @@ export function AddCharacterModal({
       return;
     }
 
-    setUploadedImage(file);
+    try {
+      // 이미지를 캔버스 비율에 맞게 조정 (흰색 배경 추가)
+      const targetRatio = canvasRatio === '16:9' ? CANVAS_RATIOS.LANDSCAPE : 
+                          canvasRatio === '1:1' ? CANVAS_RATIOS.SQUARE : 
+                          CANVAS_RATIOS.PORTRAIT;
+      
+      const resizedFile = await resizeImageToRatio(file, {
+        targetRatio: targetRatio,
+        backgroundColor: 'white',
+        maxWidth: canvasRatio === '16:9' ? 1920 : 1080,
+        quality: 0.9
+      });
+
+      setUploadedImage(resizedFile);
+      
+      // 미리보기 생성 (리사이즈된 이미지)
+      const url = URL.createObjectURL(resizedFile);
+      setPreviewUrl(url);
+
+      console.log(`이미지 비율 조정 완료 (${canvasRatio}): 원본 ${file.name} → 리사이즈 ${resizedFile.name}`);
+    } catch (error) {
+      console.error('이미지 리사이즈 실패:', error);
+      alert('이미지 처리 중 오류가 발생했습니다. 다른 이미지를 선택해주세요.');
+    }
+  };
+
+  // 파일명 안전화 함수
+  const sanitizeFileName = (fileName: string): string => {
+    // 파일 확장자 추출
+    const extension = fileName.substring(fileName.lastIndexOf('.'));
+    const nameWithoutExtension = fileName.substring(0, fileName.lastIndexOf('.'));
     
-    // 미리보기 URL 생성
-    const url = URL.createObjectURL(file);
-    setPreviewUrl(url);
+    // 한글, 특수문자, 공백을 안전한 문자로 변환
+    const sanitized = nameWithoutExtension
+      .replace(/[가-힣]/g, 'char') // 한글을 'char'로 변환
+      .replace(/[^\w\-_.]/g, '_') // 영문, 숫자, 하이픈, 언더스코어, 점만 허용
+      .replace(/_{2,}/g, '_') // 연속된 언더스코어를 하나로 축약
+      .replace(/^_|_$/g, ''); // 시작/끝 언더스코어 제거
+    
+    return sanitized + extension;
   };
 
   // 이미지 업로드 (Supabase Storage)
   const uploadImageToStorage = async (file: File): Promise<string> => {
-    const fileName = `characters/${Date.now()}-${file.name}`;
+    const sanitizedFileName = sanitizeFileName(file.name);
+    const fileName = `characters/${Date.now()}-${sanitizedFileName}`;
     
     const { data, error } = await supabase.storage
       .from('character-images')
@@ -119,7 +158,8 @@ export function AddCharacterModal({
       },
       body: JSON.stringify({
         prompt,
-        style: 'character_reference'
+        style: 'character_reference',
+        aspectRatio: canvasRatio // AI 생성 시에도 캔버스 비율 전달
       })
     });
 

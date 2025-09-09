@@ -25,7 +25,7 @@ export const SUBSCRIPTION_PLANS = {
     tokens: 10,         // 10 토큰
     characters: 2,
     projects: 3,
-    description: "무료 체험 플랜",
+    description: "취미로 시작하는 분들께",
   },
   PRO: {
     id: "PRO",
@@ -171,7 +171,7 @@ export async function executeAutoBilling(
   }
 }
 
-// 구독 생성 또는 업그레이드 (빌링키 등록 후 첫 결제)
+// 구독 생성 또는 업그레이드 (빌링키 등록 후 첫 결제) - Supabase 버전
 export async function createOrUpdateSubscription(
   userId: string,
   planId: keyof typeof SUBSCRIPTION_PLANS,
@@ -182,37 +182,53 @@ export async function createOrUpdateSubscription(
 ) {
   try {
     const plan = SUBSCRIPTION_PLANS[planId];
+    const supabase = await createClient();
     
     // 기존 구독 조회
-    const existingSubscription = await prisma.subscription.findUnique({
-      where: { userId },
-    });
+    const { data: existingSubscription } = await supabase
+      .from('subscription')
+      .select('*')
+      .eq('userId', userId)
+      .single();
     
     const subscriptionData = {
-      plan: planId as SubscriptionPlan,
+      plan: planId,
       tokensTotal: plan.tokens,
       tokensUsed: existingSubscription?.tokensUsed || 0,
       maxCharacters: plan.characters === Infinity ? 999 : plan.characters,
       maxProjects: plan.projects === Infinity ? 999 : plan.projects,
-      currentPeriodStart: new Date(),
-      currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      currentPeriodStart: new Date().toISOString(),
+      currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
       tossBillingKey: billingKey,
       tossCustomerKey: customerKey,
       cancelAtPeriodEnd: false,
     };
     
     // 구독 생성 또는 업데이트
-    const subscription = existingSubscription
-      ? await prisma.subscription.update({
-          where: { userId },
-          data: subscriptionData,
+    let subscription;
+    if (existingSubscription) {
+      const { data, error } = await supabase
+        .from('subscription')
+        .update(subscriptionData)
+        .eq('userId', userId)
+        .select()
+        .single();
+      
+      if (error) throw error;
+      subscription = data;
+    } else {
+      const { data, error } = await supabase
+        .from('subscription')
+        .insert({
+          userId,
+          ...subscriptionData,
         })
-      : await prisma.subscription.create({
-          data: {
-            userId,
-            ...subscriptionData,
-          },
-        });
+        .select()
+        .single();
+      
+      if (error) throw error;
+      subscription = data;
+    }
     
     // 첫 결제 실행 (구독 시작)
     const finalAmount = discountedAmount || plan.price;
@@ -225,8 +241,9 @@ export async function createOrUpdateSubscription(
     );
     
     // 결제 기록 생성
-    await prisma.transaction.create({
-      data: {
+    await supabase
+      .from('transaction')
+      .insert({
         userId,
         type: "SUBSCRIPTION",
         amount: finalAmount,
@@ -235,8 +252,7 @@ export async function createOrUpdateSubscription(
         description: `${plan.name} 플랜 구독 시작${discountedAmount ? ' (추천인 할인 적용)' : ''}`,
         tossPaymentKey: payment.paymentKey,
         tossOrderId: payment.orderId,
-      },
-    });
+      });
     
     // 카드 정보 로깅 (보안상 마스킹)
     console.log(`Subscription created for user ${userId} with card ending in ${cardInfo.number?.slice(-4)}`);
@@ -244,10 +260,6 @@ export async function createOrUpdateSubscription(
     return { subscription, payment };
   } catch (error) {
     console.error("Subscription creation error:", error);
-    
-    // 구독 생성 실패 시 빌링키 삭제는 별도 구현 필요
-    // (토스페이먼츠는 빌링키 삭제 API를 제공하지 않음)
-    
     throw error;
   }
 }
@@ -255,13 +267,16 @@ export async function createOrUpdateSubscription(
 // 구독 취소 (빌링키는 유지, 다음 결제만 중지)
 export async function cancelSubscription(userId: string) {
   try {
-    const subscription = await prisma.subscription.update({
-      where: { userId },
-      data: {
-        cancelAtPeriodEnd: true,
-      },
-    });
+    const supabase = await createClient();
     
+    const { data: subscription, error } = await supabase
+      .from('subscription')
+      .update({ cancelAtPeriodEnd: true })
+      .eq('userId', userId)
+      .select()
+      .single();
+    
+    if (error) throw error;
     return subscription;
   } catch (error) {
     console.error("Subscription cancellation error:", error);
@@ -269,36 +284,33 @@ export async function cancelSubscription(userId: string) {
   }
 }
 
-// 자동 결제 처리 (크론잡에서 실행) - 토스페이먼츠 v2 API 기반
+// 자동 결제 처리 (크론잡에서 실행) - Supabase 버전
 export async function processRecurringPayments() {
   try {
+    const supabase = await createClient();
+    
     // 결제일이 된 활성 구독 조회 (하루 전부터 처리)
     const today = new Date();
     const tomorrow = new Date(today);
     tomorrow.setDate(today.getDate() + 1);
     
-    const subscriptions = await prisma.subscription.findMany({
-      where: {
-        cancelAtPeriodEnd: false,
-        currentPeriodEnd: {
-          lte: tomorrow, // 하루 여유를 두고 처리
-        },
-        tossBillingKey: {
-          not: null,
-        },
-        tossCustomerKey: {
-          not: null,
-        },
-      },
-      include: {
-        user: true,
-      },
-    });
+    const { data: subscriptions, error } = await supabase
+      .from('subscription')
+      .select(`
+        *,
+        user!inner(*)
+      `)
+      .eq('cancelAtPeriodEnd', false)
+      .lte('currentPeriodEnd', tomorrow.toISOString())
+      .not('tossBillingKey', 'is', null)
+      .not('tossCustomerKey', 'is', null);
+    
+    if (error) throw error;
 
-    console.log(`Found ${subscriptions.length} subscriptions to renew`);
+    console.log(`Found ${subscriptions?.length || 0} subscriptions to renew`);
     const results = [];
     
-    for (const subscription of subscriptions) {
+    for (const subscription of subscriptions || []) {
       try {
         const plan = SUBSCRIPTION_PLANS[subscription.plan as keyof typeof SUBSCRIPTION_PLANS];
         if (!plan) {
@@ -319,19 +331,20 @@ export async function processRecurringPayments() {
         const newPeriodEnd = new Date(newPeriodStart);
         newPeriodEnd.setMonth(newPeriodEnd.getMonth() + 1); // 정확한 1개월 후
         
-        await prisma.subscription.update({
-          where: { id: subscription.id },
-          data: {
-            currentPeriodStart: newPeriodStart,
-            currentPeriodEnd: newPeriodEnd,
+        await supabase
+          .from('subscription')
+          .update({
+            currentPeriodStart: newPeriodStart.toISOString(),
+            currentPeriodEnd: newPeriodEnd.toISOString(),
             tokensTotal: plan.tokens,
             tokensUsed: 0, // 토큰 사용량 리셋
-          },
-        });
+          })
+          .eq('id', subscription.id);
         
         // 결제 성공 기록
-        await prisma.transaction.create({
-          data: {
+        await supabase
+          .from('transaction')
+          .insert({
             userId: subscription.userId,
             type: "SUBSCRIPTION",
             amount: plan.price,
@@ -340,8 +353,7 @@ export async function processRecurringPayments() {
             description: `${plan.name} 플랜 정기결제 (${newPeriodStart.toLocaleDateString()})`,
             tossPaymentKey: payment.paymentKey,
             tossOrderId: payment.orderId,
-          },
-        });
+          });
         
         results.push({
           subscriptionId: subscription.id,
@@ -362,33 +374,30 @@ export async function processRecurringPayments() {
           : "정기결제 처리 중 오류가 발생했습니다";
         
         // 결제 실패 기록
-        await prisma.transaction.create({
-          data: {
+        await supabase
+          .from('transaction')
+          .insert({
             userId: subscription.userId,
             type: "SUBSCRIPTION",
             amount: 0,
             status: "FAILED",
             description: `정기결제 실패: ${errorMessage}`,
-          },
-        });
+          });
         
         // 3회 연속 실패 시 구독 자동 취소 로직
-        const recentFailures = await prisma.transaction.count({
-          where: {
-            userId: subscription.userId,
-            type: "SUBSCRIPTION",
-            status: "FAILED",
-            createdAt: {
-              gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // 최근 30일
-            },
-          },
-        });
+        const { count: recentFailures } = await supabase
+          .from('transaction')
+          .select('*', { count: 'exact', head: true })
+          .eq('userId', subscription.userId)
+          .eq('type', 'SUBSCRIPTION')
+          .eq('status', 'FAILED')
+          .gte('createdAt', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
         
-        if (recentFailures >= 3) {
-          await prisma.subscription.update({
-            where: { id: subscription.id },
-            data: { cancelAtPeriodEnd: true },
-          });
+        if (recentFailures && recentFailures >= 3) {
+          await supabase
+            .from('subscription')
+            .update({ cancelAtPeriodEnd: true })
+            .eq('id', subscription.id);
           
           console.log(`Auto-cancelled subscription ${subscription.id} due to repeated failures`);
         }
@@ -398,7 +407,7 @@ export async function processRecurringPayments() {
           userId: subscription.userId,
           status: "failed",
           error: errorMessage,
-          failureCount: recentFailures,
+          failureCount: recentFailures || 0,
         });
       }
     }
@@ -447,12 +456,16 @@ export async function processRefund(
   reason: string
 ) {
   try {
-    // 트랜잭션 조회
-    const transaction = await prisma.transaction.findUnique({
-      where: { id: transactionId },
-    });
+    const supabase = await createClient();
     
-    if (!transaction || !transaction.tossPaymentKey) {
+    // 트랜잭션 조회
+    const { data: transaction, error: fetchError } = await supabase
+      .from('transaction')
+      .select('*')
+      .eq('id', transactionId)
+      .single();
+    
+    if (fetchError || !transaction || !transaction.tossPaymentKey) {
       throw new Error("결제 정보를 찾을 수 없습니다");
     }
     
@@ -478,23 +491,21 @@ export async function processRefund(
     }
     
     // 트랜잭션 상태 업데이트
-    await prisma.transaction.update({
-      where: { id: transactionId },
-      data: {
-        status: "REFUNDED",
-      },
-    });
+    await supabase
+      .from('transaction')
+      .update({ status: "REFUNDED" })
+      .eq('id', transactionId);
     
     // 환불 기록 생성
-    await prisma.transaction.create({
-      data: {
+    await supabase
+      .from('transaction')
+      .insert({
         userId,
         type: "REFUND",
         amount: -refundAmount,
         status: "COMPLETED",
         description: `환불: ${reason}`,
-      },
-    });
+      });
     
     return true;
   } catch (error) {
@@ -506,18 +517,18 @@ export async function processRefund(
 // 결제 내역 조회
 export async function getPaymentHistory(userId: string, limit = 10) {
   try {
-    const transactions = await prisma.transaction.findMany({
-      where: {
-        userId,
-        type: {
-          in: ["SUBSCRIPTION", "TOKEN_PURCHASE", "REFUND"],
-        },
-      },
-      orderBy: { createdAt: "desc" },
-      take: limit,
-    });
+    const supabase = await createClient();
     
-    return transactions;
+    const { data: transactions, error } = await supabase
+      .from('transaction')
+      .select('*')
+      .eq('userId', userId)
+      .in('type', ["SUBSCRIPTION", "TOKEN_PURCHASE", "REFUND"])
+      .order('createdAt', { ascending: false })
+      .limit(limit);
+    
+    if (error) throw error;
+    return transactions || [];
   } catch (error) {
     console.error("Get payment history error:", error);
     return [];

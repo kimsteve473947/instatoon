@@ -28,7 +28,7 @@ interface Character {
 }
 
 interface Subscription {
-  plan: 'FREE' | 'PERSONAL' | 'HEAVY' | 'ENTERPRISE';
+  plan: 'FREE' | 'PRO' | 'PREMIUM';
   maxCharacters: number;
 }
 
@@ -95,7 +95,7 @@ export function CharacterSelector({
         // 기본 무료 플랜
         setSubscription({
           plan: 'FREE',
-          maxCharacters: 1
+          maxCharacters: 2
         });
       }
 
@@ -127,29 +127,25 @@ export function CharacterSelector({
   };
 
   const getMaxCharacters = () => {
-    if (!subscription) return 1;
+    if (!subscription) return 2;
     
     switch (subscription.plan) {
       case 'FREE':
-        return 1;
-      case 'PERSONAL':
+        return 2;
+      case 'PRO':
         return 3;
-      case 'HEAVY':
+      case 'PREMIUM':
         return 5;
-      case 'ENTERPRISE':
-        return Infinity;
       default:
-        return 1;
+        return 2;
     }
   };
 
   const getPlanIcon = (plan: string) => {
     switch (plan) {
-      case 'PERSONAL':
+      case 'PRO':
         return <User className="h-3 w-3" />;
-      case 'HEAVY':
-        return <Star className="h-3 w-3" />;
-      case 'ENTERPRISE':
+      case 'PREMIUM':
         return <Crown className="h-3 w-3" />;
       default:
         return null;
@@ -158,12 +154,10 @@ export function CharacterSelector({
 
   const getPlanColor = (plan: string) => {
     switch (plan) {
-      case 'PERSONAL':
+      case 'PRO':
         return 'bg-blue-100 text-blue-700';
-      case 'HEAVY':
+      case 'PREMIUM':
         return 'bg-purple-100 text-purple-700';
-      case 'ENTERPRISE':
-        return 'bg-gold-100 text-gold-700';
       default:
         return 'bg-gray-100 text-gray-700';
     }
@@ -240,7 +234,7 @@ export function CharacterSelector({
         <div className="flex items-center gap-2 p-2 bg-amber-50 border border-amber-200 rounded-lg">
           <Lock className="h-4 w-4 text-amber-500" />
           <p className="text-xs text-amber-700">
-            {subscription?.plan === 'FREE' ? '무료 플랜은 캐릭터 1개만 선택 가능합니다' : 
+            {subscription?.plan === 'FREE' ? '무료 플랜은 캐릭터 2개까지 선택 가능합니다' : 
              `${subscription?.plan} 플랜은 캐릭터 ${maxCharacters}개까지 선택 가능합니다`}
           </p>
         </div>

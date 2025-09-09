@@ -75,26 +75,31 @@ export default function Home() {
               <strong>웹툰부터 인스타그램 콘텐츠까지</strong> 템플릿으로 쉽고 간편하게 시작해보세요!
             </p>
             
-            <div className="flex flex-col sm:flex-row gap-4 justify-center mb-8">
+            <div className="flex flex-col sm:flex-row gap-6 justify-center mb-12 max-w-2xl mx-auto">
               <Button 
                 size="lg" 
-                className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-lg px-8 rounded-full"
+                className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-xl font-semibold px-12 py-6 h-16 rounded-2xl shadow-xl hover:shadow-2xl transition-all duration-300 hover:scale-[1.02] flex-1"
                 onClick={handleStartClick}
                 disabled={isLoggedIn === null} // 로딩 중일 때 비활성화
               >
                 {isLoggedIn === null ? (
                   "로딩 중..."
                 ) : isLoggedIn ? (
-                  "스튜디오 열기"
+                  "제작 스튜디오 열기"
                 ) : (
                   "바로 시작하기"
                 )}
-                <ArrowRight className="ml-2 h-5 w-5" />
+                <ArrowRight className="ml-3 h-6 w-6" />
               </Button>
-              <Button size="lg" variant="outline" asChild className="text-lg px-8 rounded-full border-2 hover:bg-muted/50">
+              <Button 
+                size="lg" 
+                variant="outline" 
+                asChild 
+                className="text-xl font-semibold px-12 py-6 h-16 rounded-2xl border-2 border-purple-200 hover:border-purple-300 hover:bg-purple-50 shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-[1.02] flex-1"
+              >
                 <Link href="/gallery">
                   갤러리 보기
-                  <ChevronRight className="ml-2 h-5 w-5" />
+                  <ChevronRight className="ml-3 h-6 w-6" />
                 </Link>
               </Button>
             </div>
@@ -272,7 +277,7 @@ export default function Home() {
                   onClick={handleStartClick}
                   disabled={isLoggedIn === null}
                 >
-                  {isLoggedIn === null ? "로딩 중..." : isLoggedIn ? "스튜디오 열기" : "무료 시작"}
+                  {isLoggedIn === null ? "로딩 중..." : isLoggedIn ? "제작 스튜디오 열기" : "무료 시작"}
                 </Button>
               </CardContent>
             </Card>
@@ -353,7 +358,7 @@ export default function Home() {
             onClick={handleStartClick}
             disabled={isLoggedIn === null}
           >
-            {isLoggedIn === null ? "로딩 중..." : isLoggedIn ? "스튜디오 열기" : "무료로 시작하기"}
+            {isLoggedIn === null ? "로딩 중..." : isLoggedIn ? "제작 스튜디오 열기" : "무료로 시작하기"}
             <ArrowRight className="ml-2 h-5 w-5" />
           </Button>
         </div>
