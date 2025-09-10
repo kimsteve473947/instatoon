@@ -1,0 +1,31 @@
+{
+  "mcpServers": {
+    "instartoon": {
+      "command": "node",
+      "args": ["/Users/gimjunghwi/Library/CloudStorage/GoogleDrive-kimjh473947@gmail.com/내 드라이브/인스타툰/simple-mcp-server.js"],
+      "cwd": "/Users/gimjunghwi/Library/CloudStorage/GoogleDrive-kimjh473947@gmail.com/내 드라이브/인스타툰"
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/Users/gimjunghwi/Library/CloudStorage/GoogleDrive-kimjh473947@gmail.com/내 드라이브/인스타툰"],
+      "env": {}
+    },
+    "sqlite": {
+      "command": "npx", 
+      "args": ["-y", "@modelcontextprotocol/server-sqlite", "--db-path", "/Users/gimjunghwi/Library/CloudStorage/GoogleDrive-kimjh473947@gmail.com/내 드라이브/인스타툰/data.db"],
+      "env": {}
+    },
+    "supabase-trumpettour": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@supabase/mcp-server-supabase@latest",
+        "--project-ref=lzxkvtwuatsrczhctsxb"
+      ],
+      "env": {
+        "SUPABASE_ACCESS_TOKEN": "sbp_7fa69616084177fe05864f7523e5e1c5103848a0"
+      }
+    }
+  }
+}
