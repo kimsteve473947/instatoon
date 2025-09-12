@@ -22,7 +22,6 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createBrowserClient } from '@supabase/ssr';
-import { resizeImageToRatio, CANVAS_RATIOS } from '@/lib/utils/image-resize';
 
 interface AddCharacterModalProps {
   open: boolean;
@@ -90,25 +89,15 @@ export function AddCharacterModal({
     }
 
     try {
-      // 이미지를 캔버스 비율에 맞게 조정 (흰색 배경 추가)
-      const targetRatio = canvasRatio === '16:9' ? CANVAS_RATIOS.LANDSCAPE : 
-                          canvasRatio === '1:1' ? CANVAS_RATIOS.SQUARE : 
-                          CANVAS_RATIOS.PORTRAIT;
+      // 이미지 리사이즈 기능 임시 비활성화 (Sharp 라이브러리 문제로 인해)
+      console.log('Image resize temporarily disabled due to Sharp library issue');
+      setUploadedImage(file);
       
-      const resizedFile = await resizeImageToRatio(file, {
-        targetRatio: targetRatio,
-        backgroundColor: 'white',
-        maxWidth: canvasRatio === '16:9' ? 1920 : 1080,
-        quality: 0.9
-      });
-
-      setUploadedImage(resizedFile);
-      
-      // 미리보기 생성 (리사이즈된 이미지)
-      const url = URL.createObjectURL(resizedFile);
+      // 미리보기 생성 (원본 이미지)
+      const url = URL.createObjectURL(file);
       setPreviewUrl(url);
 
-      console.log(`이미지 비율 조정 완료 (${canvasRatio}): 원본 ${file.name} → 리사이즈 ${resizedFile.name}`);
+      console.log(`이미지 업로드 완료: ${file.name}`);
     } catch (error) {
       console.error('이미지 리사이즈 실패:', error);
       alert('이미지 처리 중 오류가 발생했습니다. 다른 이미지를 선택해주세요.');
@@ -197,41 +186,110 @@ export function AddCharacterModal({
     try {
       setIsCreating(true);
       
+      // 사용자 정보 가져오기
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        throw new Error('로그인이 필요합니다');
+      }
+
+      // 사용자 데이터 조회
+      const { data: userData } = await supabase
+        .from('user')
+        .select('id')
+        .eq('supabaseId', user.id)
+        .single();
+
+      if (!userData) {
+        throw new Error('사용자 정보를 찾을 수 없습니다');
+      }
+
       let imageUrl = '';
       let referenceImages: string[] = [];
+      let ratioImages: any = null;
 
       if (mode === 'upload' && uploadedImage) {
         // 이미지 업로드
         imageUrl = await uploadImageToStorage(uploadedImage);
         referenceImages = [imageUrl];
+        
+        // API를 통한 멀티 비율 이미지 처리
+        console.log('🎨 API 기반 multi-ratio processing 시작...');
+        try {
+          const processingResponse = await fetch('/api/characters/process-images', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              referenceImages,
+              userId: userData.id
+            })
+          });
+
+          const processingResult = await processingResponse.json();
+          
+          if (processingResult.success && processingResult.ratioImages) {
+            ratioImages = processingResult.ratioImages;
+            console.log('✅ Multi-ratio processing completed:', ratioImages);
+          } else {
+            console.error('❌ Multi-ratio processing failed:', processingResult.error);
+            // 실패해도 원본 이미지는 저장되도록 계속 진행
+          }
+        } catch (processingError) {
+          console.error('❌ Multi-ratio processing API error:', processingError);
+          // API 오류가 발생해도 원본 이미지는 저장되도록 계속 진행
+        }
       } else if (mode === 'ai' && aiPrompt.trim()) {
         // AI 캐릭터 생성
         imageUrl = await generateAiCharacter(aiPrompt);
         referenceImages = [imageUrl];
+        
+        // AI 생성 이미지도 API를 통한 멀티 비율 처리
+        console.log('🤖 AI character API 기반 multi-ratio processing 시작...');
+        try {
+          const processingResponse = await fetch('/api/characters/process-images', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              referenceImages,
+              userId: userData.id
+            })
+          });
+
+          const processingResult = await processingResponse.json();
+          
+          if (processingResult.success && processingResult.ratioImages) {
+            ratioImages = processingResult.ratioImages;
+            console.log('✅ AI character multi-ratio processing completed:', ratioImages);
+          } else {
+            console.error('❌ AI character multi-ratio processing failed:', processingResult.error);
+            // 실패해도 원본 이미지는 저장되도록 계속 진행
+          }
+        } catch (processingError) {
+          console.error('❌ AI character multi-ratio processing API error:', processingError);
+          // API 오류가 발생해도 원본 이미지는 저장되도록 계속 진행
+        }
       }
 
-      // 캐릭터 API를 통해 저장 (비율별 이미지 처리 포함)
-      const response = await fetch('/api/characters', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
+      // 캐릭터 데이터베이스에 저장
+      const { data: character, error } = await supabase
+        .from('character')
+        .insert({
+          userId: userData.id,
           name: name.trim(),
           description: description.trim(),
-          referenceImages: referenceImages
+          referenceImages: referenceImages,
+          ratioImages: ratioImages, // 비율별 이미지 추가
+          thumbnailUrl: imageUrl,
+          isPublic: false,
+          isFavorite: false
         })
-      });
+        .select()
+        .single();
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || '캐릭터 생성에 실패했습니다.');
-      }
-
-      const result = await response.json();
-      if (!result.success) {
-        throw new Error(result.error || '캐릭터 생성에 실패했습니다.');
-      }
+      if (error) throw error;
 
       // 성공 처리
       onCharacterAdded?.();
@@ -251,7 +309,7 @@ export function AddCharacterModal({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <User className="h-5 w-5" />
-            새 캐릭터 추가
+            새 캐릭터 직접 추가
           </DialogTitle>
           <DialogDescription>
             캐릭터를 생성하여 웹툰에서 일관된 외모로 활용하세요
@@ -262,27 +320,15 @@ export function AddCharacterModal({
           {/* 생성 방식 선택 */}
           {!mode && (
             <div className="space-y-4">
-              <Label className="text-base font-medium">생성 방식 선택</Label>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="text-center">
                 <button
                   onClick={() => setMode('upload')}
-                  className="flex flex-col items-center gap-3 p-6 border-2 border-dashed border-slate-300 rounded-lg hover:border-purple-300 hover:bg-purple-50 transition-all"
+                  className="flex flex-col items-center gap-3 p-6 border-2 border-dashed border-slate-300 rounded-lg hover:border-purple-300 hover:bg-purple-50 transition-all w-full"
                 >
                   <Upload className="h-8 w-8 text-slate-400" />
                   <div className="text-center">
                     <p className="font-medium text-slate-700">이미지 업로드</p>
-                    <p className="text-sm text-slate-500">컴퓨터에서 선택</p>
-                  </div>
-                </button>
-
-                <button
-                  onClick={() => setMode('ai')}
-                  className="flex flex-col items-center gap-3 p-6 border-2 border-dashed border-slate-300 rounded-lg hover:border-purple-300 hover:bg-purple-50 transition-all"
-                >
-                  <Sparkles className="h-8 w-8 text-slate-400" />
-                  <div className="text-center">
-                    <p className="font-medium text-slate-700">AI 생성</p>
-                    <p className="text-sm text-slate-500">설명으로 생성</p>
+                    <p className="text-sm text-slate-500">컴퓨터에서 직접 선택</p>
                   </div>
                 </button>
               </div>
@@ -438,6 +484,7 @@ export function AddCharacterModal({
           )}
         </div>
       </DialogContent>
+
     </Dialog>
   );
 }

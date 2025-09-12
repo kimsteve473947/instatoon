@@ -13,28 +13,16 @@ export async function GET(request: NextRequest) {
         { status: 401 }
       );
     }
-
-    // 내부 사용자 ID 찾기
-    const { data: userData } = await supabase
-      .from('user')
-      .select('id')
-      .eq('supabaseId', user.id)
-      .single();
-
-    if (!userData) {
-      return NextResponse.json(
-        { success: false, error: "사용자 정보를 찾을 수 없습니다" },
-        { status: 404 }
-      );
-    }
     
-    const balance = await tokenManager.getBalance(userData.id);
-    const isLow = await tokenManager.checkLowBalance(userData.id);
+    const balance = await tokenManager.getBalance(user.id);
+    const isLow = await tokenManager.checkLowBalance(user.id);
+    const stats = await tokenManager.getUsageStats(user.id);
     
     return NextResponse.json({
       success: true,
       balance,
       isLowBalance: isLow,
+      stats,
     });
   } catch (error) {
     console.error("Get token balance error:", error);

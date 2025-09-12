@@ -25,10 +25,12 @@ const ASPECT_RATIO_TEMPLATES = {
       'The image MUST be a perfect 1:1 square ratio',
       'Equal width and height dimensions exactly',
       'Center the subject within the square frame',
-      'Balanced composition that fills the square format completely',
+      'Fill the ENTIRE SQUARE FRAME from edge to edge',
+      'No empty borders, margins, or whitespace - full bleed',
+      'Balanced composition that maximally uses the square format',
       'No rectangular or portrait elements - pure square format only'
     ],
-    dimensions: (size: number) => `${size}x${size}`,
+    dimensions: (width: number, height: number) => `1024x1024`,
     description: 'Perfect square format with centered composition'
   },
   '4:5': {
@@ -38,12 +40,14 @@ const ASPECT_RATIO_TEMPLATES = {
     requirements: [
       'The image MUST be in 4:5 portrait ratio (vertical orientation)',
       'Taller than wide - vertical format',
-      'Compose vertically with proper headroom and ground space',
-      'Utilize the full vertical space effectively',
-      'Perfect for social media portrait format'
+      'Fill the ENTIRE VERTICAL FRAME from top to bottom',
+      'No empty borders, margins, or whitespace - full bleed',
+      'Compose vertically with full height utilization',
+      'Utilize the full vertical space effectively - edge to edge',
+      'Perfect for social media portrait format - maximize frame usage'
     ],
     dimensions: (width: number, height: number) => `${width}x${height}`,
-    description: 'Vertical portrait format optimized for social media'
+    description: 'Vertical portrait format (Gemini generation size: 896×1152px)'
   },
   '16:9': {
     format: 'LANDSCAPE HORIZONTAL',
@@ -52,9 +56,11 @@ const ASPECT_RATIO_TEMPLATES = {
     requirements: [
       'The image MUST be in 16:9 landscape ratio (horizontal orientation)',
       'Wider than tall - horizontal format',
-      'Compose horizontally with proper left-right balance',
-      'Utilize the full width for panoramic effect',
-      'Perfect for widescreen landscape format'
+      'Fill the ENTIRE HORIZONTAL FRAME from left to right',
+      'No empty borders, margins, or whitespace - full bleed',
+      'Compose horizontally with full width utilization',
+      'Utilize the full width for panoramic effect - edge to edge',
+      'Perfect for widescreen landscape format - maximize frame usage'
     ],
     dimensions: (width: number, height: number) => `${width}x${height}`,
     description: 'Wide horizontal landscape format'
@@ -65,71 +71,103 @@ const ASPECT_RATIO_TEMPLATES = {
  * 비율에 최적화된 완벽한 프롬프트 생성
  */
 export function generateOptimizedPrompt(options: PromptTemplateOptions): string {
-  const { aspectRatio, userPrompt, characterInstructions } = options;
+  const { aspectRatio, userPrompt, characterInstructions, width, height } = options;
   const template = ASPECT_RATIO_TEMPLATES[aspectRatio];
   
   // 정확한 치수 계산
-  // 비율 기반 접근법 - 절대적 크기 제거
+  const exactDimensions = template.dimensions(width, height);
   
-  // 비율에 따른 정확한 픽셀 크기 계산
-  const exactDimensions = getRecommendedDimensions(aspectRatio);
-  
-  const optimizedPrompt = `🚨 CRITICAL ASPECT RATIO REQUIREMENT: MUST BE EXACTLY ${aspectRatio} RATIO 🚨
-
-GENERATE IMAGE: Create a professional Korean webtoon panel image with these EXACT specifications:
+  const optimizedPrompt = `Create a professional Korean webtoon style illustration with these EXACT specifications:
 
 ${userPrompt}
 
 ${characterInstructions ? `
 🎭 CHARACTER CONSISTENCY REQUIREMENTS:
 ${characterInstructions}
-- Maintain exact character appearance from reference images
-- Preserve all visual details and characteristics
-- Adapt to the scene while keeping character identity intact
+- Maintain EXACT character appearance from reference images
+- Preserve ALL visual details and characteristics PRECISELY
+- Keep the same face shape, hair style, eye color, clothing details
+- Use the reference images as the PRIMARY source for character design
+- Character appearance must be IDENTICAL to the reference images
+- Adapt to the scene while keeping character identity COMPLETELY intact
+- The reference images are the DEFINITIVE guide for how characters should look
 ` : ''}
 
-📐 MANDATORY IMAGE DIMENSIONS AND RATIO - NO EXCEPTIONS:
-• ⚡ CRITICAL: EXACT RATIO ${aspectRatio} - NOT 1:1, NOT ANY OTHER RATIO
-• EXACT SIZE: ${exactDimensions.width} × ${exactDimensions.height} pixels  
-• FORMAT: ${template.format} - MUST BE ${template.orientation}
-• ORIENTATION: ${template.orientation} - ${aspectRatio === '4:5' ? 'VERTICAL PORTRAIT' : aspectRatio === '16:9' ? 'HORIZONTAL LANDSCAPE' : 'PERFECT SQUARE'}
-• COMPOSITION: ${template.composition}
-
-⚠️ CRITICAL REQUIREMENTS - ABSOLUTE COMPLIANCE REQUIRED:
+📐 CRITICAL ASPECT RATIO REQUIREMENTS - ${template.format}:
 ${template.requirements.map(req => `• ${req}`).join('\n')}
-• 🔥 NEVER GENERATE 1:1 SQUARE IMAGES WHEN ${aspectRatio} IS REQUESTED
-• 🔥 MUST FOLLOW ${aspectRatio} ASPECT RATIO EXACTLY
 
-🎨 KOREAN WEBTOON STYLE SPECIFICATIONS:
-• High-quality digital illustration optimized for ${aspectRatio} format
-• Clean, vibrant colors suitable for webtoon
-• Professional character design and backgrounds
-• Clear focal points and balanced composition for ${template.orientation} orientation
-• Style consistent with modern Korean webcomics
-• NO text, speech bubbles, or dialogue in the image
-• Perfect fit for ${exactDimensions.width}×${exactDimensions.height} canvas
+📏 EXACT DIMENSIONS REQUIRED:
+• Target size: ${exactDimensions} pixels
+• Aspect ratio: ${aspectRatio} (${template.description})
+• Orientation: ${template.orientation}
+• Composition style: ${template.composition}
 
-🚫 ABSOLUTELY FORBIDDEN ELEMENTS:
-• NO black borders, frames, or outlines around the image
-• NO white borders, frames, or picture frame effects
-• NO decorative borders or edge effects of any kind
-• The image should fill the entire canvas edge-to-edge
-• NO letterbox, pillarbox, or any boxing effects
-• Generate content that extends completely to all edges
-• Seamless image without any border artifacts
+🎨 KOREAN WEBTOON ILLUSTRATION STYLE:
+• High-quality digital artwork in Korean manhwa/webtoon aesthetic
+• Clean, vibrant colors with smooth digital painting style
+• Professional character design and detailed backgrounds
+• Clear focal points and balanced composition
+• Modern Korean digital comic book art style
+• Seamless full-canvas illustration - NOT a comic panel or frame
+• Content flows naturally across the entire canvas edge-to-edge
+• Complete scene illustration without any framing elements
+• NO WHITE PADDING or margins - pure artwork fills entire space
+• NO BORDER effects - this is a complete standalone illustration
+• Artwork extends fully to all canvas edges like a digital painting
+• Think "digital art piece" NOT "comic book panel"
 
-🔒 NON-NEGOTIABLE FINAL REQUIREMENTS:
-1. OUTPUT IMAGE MUST BE EXACTLY ${exactDimensions.width} × ${exactDimensions.height} pixels
-2. OUTPUT IMAGE MUST BE EXACTLY ${aspectRatio} aspect ratio - NOT 1:1 OR ANY OTHER RATIO
-3. ${template.format} format is absolutely mandatory
-4. ${template.orientation} orientation only - no exceptions  
-5. Perfect ${template.composition} composition required
-6. Do NOT crop, stretch, or distort - generate natively in ${aspectRatio}
+🚫 STRICTLY PROHIBITED ELEMENTS:
+• NO TEXT of any kind (Korean, English, symbols, signs, labels)
+• NO SPEECH BUBBLES or dialogue balloons
+• NO THOUGHT BUBBLES or conversation elements
+• NO WRITTEN WORDS anywhere in the image
+• NO TYPOGRAPHY or lettering elements
+• NO WATERMARKS or text overlays
+• NO CAPTIONS or subtitles
+• NO BOOK TEXT, NEWSPAPER TEXT, or SIGNS
+• NO WHITE MARGINS, padding, or empty borders around content
+• NO FRAME effects or picture-frame style composition
+• NO PANEL BORDERS or comic book frame effects
+• NO RECTANGULAR FRAMES or border lines around the image
+• NO WINDOW FRAMES or architectural framing elements
+• NO PHOTO FRAME effects or picture frame appearance
+• NO EMPTY WHITE SPACE around the main subject
+• NO COMIC BOOK PANEL appearance - this is a COMPLETE ILLUSTRATION, not a panel
+• NO WEBTOON PANEL borders or frames - treat as standalone digital art
+• The illustration must fill the ENTIRE canvas like a digital painting
+• Think "full digital artwork" NOT "comic panel with content inside"
+• PURE VISUAL STORYTELLING through complete scene illustration
 
-🎯 FINAL GENERATION COMMAND:
-Generate EXACTLY ${aspectRatio} aspect ratio image (${exactDimensions.width}×${exactDimensions.height} pixels) with ${template.orientation} orientation. 
-NEVER generate 1:1 square images when ${aspectRatio} is requested.
-CRITICAL: The final output MUST be ${aspectRatio} ratio, not square (1:1).`;
+⚠️ ABSOLUTE REQUIREMENTS - NON-NEGOTIABLE:
+1. The final image MUST be exactly ${aspectRatio} aspect ratio
+2. Dimensions must be ${exactDimensions} pixels  
+3. ${template.format} format is mandatory
+4. ${template.orientation} orientation only
+5. Perfect ${template.composition} required
+6. ZERO TEXT OR WRITING of any kind - ABSOLUTELY FORBIDDEN
+7. Full bleed composition - fill entire frame edge to edge
+8. ABSOLUTELY NO WHITE PADDING or margins - content must reach all edges
+9. No speech bubbles, dialogue, or text elements whatsoever
+10. ABSOLUTELY NO FRAMES, BORDERS, or PANEL EFFECTS - this is a COMPLETE DIGITAL ILLUSTRATION
+11. Content must extend to ALL FOUR EDGES like a seamless digital painting  
+12. NO RECTANGULAR BORDER appearance - treat as FULL ARTWORK, not content inside a frame
+13. Think "digital art masterpiece" NOT "webtoon panel with borders"
+
+🔍 FINAL VALIDATION CHECKPOINT:
+Before generation, verify ALL these requirements:
+- Is this image exactly ${aspectRatio} ratio in ${template.orientation} ${template.format} format?
+- Does the composition fill the entire frame edge-to-edge with no margins?
+- Is there absolutely NO WHITE PADDING or empty space around the content?
+- Does the artwork extend fully to all four edges without any frame effect?
+- Is there absolutely NO TEXT, speech bubbles, or writing of any kind?
+- Does the image maximize visual content within the aspect ratio boundaries?
+- Is there NO FRAME, BORDER, or PANEL appearance - no rectangular framing?
+- Does the image look like a FULL SCENE, not content inside a frame?
+- Is the content bleeding to all edges with zero empty space around it?
+
+If ANY requirement is not met, adjust composition before generation.
+
+Generate the image now with perfect adherence to these specifications.`;
 
   return optimizedPrompt;
 }
@@ -142,11 +180,11 @@ export function getRecommendedDimensions(aspectRatio: AspectRatio): { width: num
     case '1:1':
       return { width: 1024, height: 1024 }; // Perfect square
     case '4:5':
-      return { width: 1024, height: 1280 }; // Portrait for social media
+      return { width: 896, height: 1152 }; // Gemini 4:5 generation size
     case '16:9':
       return { width: 1920, height: 1080 }; // Landscape widescreen
     default:
-      return { width: 1024, height: 1280 }; // Default to 4:5
+      return { width: 896, height: 1152 }; // Default to Gemini 4:5
   }
 }
 

@@ -9,8 +9,7 @@ import { createClient } from '@supabase/supabase-js';
 
 export interface RatioImages {
   '1:1': string[];
-  '4:5': string[];  
-  '16:9': string[];
+  '4:5': string[];
 }
 
 export interface ImageProcessingResult {
@@ -20,11 +19,10 @@ export interface ImageProcessingResult {
   processedCount?: number;
 }
 
-// 비율별 권장 크기 정의
+// 비율별 권장 크기 정의 (center crop 방식)
 const RATIO_DIMENSIONS = {
   '1:1': { width: 1024, height: 1024 },
-  '4:5': { width: 1024, height: 1280 },
-  '16:9': { width: 1920, height: 1080 }
+  '4:5': { width: 896, height: 1115 }  // 4:5 비율 (896 × 1115)
 } as const;
 
 // Supabase 클라이언트 설정
@@ -47,8 +45,7 @@ export async function processCharacterImages(
     let processedCount = 0;
     const ratioImages: RatioImages = {
       '1:1': [],
-      '4:5': [],
-      '16:9': []
+      '4:5': []
     };
     
     // 각 원본 이미지를 처리
@@ -57,15 +54,15 @@ export async function processCharacterImages(
       console.log(`📸 Processing image ${i + 1}/${originalImages.length}: ${imageUrl.slice(0, 50)}...`);
       
       // 각 비율로 변환
-      for (const ratio of ['1:1', '4:5', '16:9'] as const) {
+      for (const ratio of ['1:1', '4:5'] as const) {
         try {
-          const paddedImageBuffer = await addWhitePaddingToRatio(imageUrl, ratio);
+          const croppedImageBuffer = await centerCropToRatio(imageUrl, ratio);
           const filename = `character_${characterId}_${i}_${ratio}_${Date.now()}.png`;
           
           // Supabase Storage에 저장
           const { data, error } = await supabase.storage
             .from('character-images')
-            .upload(`ratio-images/${filename}`, paddedImageBuffer, {
+            .upload(`ratio-images/${filename}`, croppedImageBuffer, {
               contentType: 'image/png',
               upsert: false
             });
@@ -107,9 +104,9 @@ export async function processCharacterImages(
 }
 
 /**
- * 이미지에 하얀 배경 패딩을 추가하여 특정 비율로 변환
+ * 이미지를 가운데 기준으로 크롭하여 특정 비율로 변환
  */
-async function addWhitePaddingToRatio(
+async function centerCropToRatio(
   imageUrl: string,
   targetRatio: keyof typeof RATIO_DIMENSIONS
 ): Promise<Buffer> {
@@ -137,38 +134,48 @@ async function addWhitePaddingToRatio(
   
   console.log(`📏 Processing for ${targetRatio}: Original ${originalWidth}x${originalHeight} (${originalRatio.toFixed(2)}) → Target ${targetDimensions.width}x${targetDimensions.height} (${targetRatioNum.toFixed(2)})`);
   
-  // 리사이즈 및 패딩 계산
-  let newWidth, newHeight;
-  let padTop = 0, padBottom = 0, padLeft = 0, padRight = 0;
+  // Center crop 계산 (cover 방식 - 목표 비율로 무조건 크롭)
+  // 항상 원본 이미지보다 약간 작게 크롭하여 하얀색 제거
+  const cropMargin = Math.min(originalWidth, originalHeight) * 0.03; // 3% 마진으로 크롭
+  const adjustedWidth = originalWidth - cropMargin * 2;
+  const adjustedHeight = originalHeight - cropMargin * 2;
+  const adjustedRatio = adjustedWidth / adjustedHeight;
   
-  if (originalRatio > targetRatioNum) {
-    // 원본이 더 가로로 넓음 - 높이에 맞추고 좌우에 패딩
-    newWidth = targetDimensions.width;
-    newHeight = Math.round(targetDimensions.width / originalRatio);
-    padTop = Math.floor((targetDimensions.height - newHeight) / 2);
-    padBottom = targetDimensions.height - newHeight - padTop;
+  let cropWidth, cropHeight;
+  let cropLeft = cropMargin, cropTop = cropMargin;
+  
+  if (adjustedRatio > targetRatioNum) {
+    // 조정된 이미지가 더 넓음 - 높이에 맞추고 좌우 크롭
+    cropHeight = Math.round(adjustedHeight);
+    cropWidth = Math.round(adjustedHeight * targetRatioNum);
+    cropLeft = Math.round(cropMargin + Math.floor((adjustedWidth - cropWidth) / 2));
+    cropTop = Math.round(cropMargin);
+  } else if (adjustedRatio < targetRatioNum) {
+    // 조정된 이미지가 더 높음 - 너비에 맞추고 상하 크롭
+    cropWidth = Math.round(adjustedWidth);
+    cropHeight = Math.round(adjustedWidth / targetRatioNum);
+    cropLeft = Math.round(cropMargin);
+    cropTop = Math.round(cropMargin + Math.floor((adjustedHeight - cropHeight) / 2));
   } else {
-    // 원본이 더 세로로 김 또는 같음 - 너비에 맞추고 상하에 패딩
-    newHeight = targetDimensions.height;
-    newWidth = Math.round(targetDimensions.height * originalRatio);
-    padLeft = Math.floor((targetDimensions.width - newWidth) / 2);
-    padRight = targetDimensions.width - newWidth - padLeft;
+    // 비율이 거의 같으면 조정된 전체 영역 사용
+    cropWidth = Math.round(adjustedWidth);
+    cropHeight = Math.round(adjustedHeight);
+    cropLeft = Math.round(cropMargin);
+    cropTop = Math.round(cropMargin);
   }
   
-  console.log(`🔧 Padding calculation: resize to ${newWidth}x${newHeight}, pad: top=${padTop}, bottom=${padBottom}, left=${padLeft}, right=${padRight}`);
+  console.log(`🔧 Center crop calculation: crop area ${cropWidth}x${cropHeight} at offset (${cropLeft}, ${cropTop})`);
   
-  // Sharp로 이미지 처리
+  // Sharp를 사용하여 center crop 및 리사이즈
   const processedImage = await Sharp(imageBuffer)
-    .resize(newWidth, newHeight, {
-      fit: 'fill',
-      background: { r: 255, g: 255, b: 255, alpha: 1 }
+    .extract({
+      left: cropLeft,
+      top: cropTop,
+      width: cropWidth,
+      height: cropHeight
     })
-    .extend({
-      top: padTop,
-      bottom: padBottom,
-      left: padLeft,
-      right: padRight,
-      background: { r: 255, g: 255, b: 255, alpha: 1 }
+    .resize(targetDimensions.width, targetDimensions.height, {
+      fit: 'fill'
     })
     .png()
     .toBuffer();

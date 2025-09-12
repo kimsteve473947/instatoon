@@ -1,13 +1,11 @@
 export interface CanvasRatio {
   '1:1': { width: number, height: number }
   '4:5': { width: number, height: number }
-  '16:9': { width: number, height: number }
 }
 
 export const CANVAS_DIMENSIONS: CanvasRatio = {
   '1:1': { width: 1024, height: 1024 },
-  '4:5': { width: 1024, height: 1280 },
-  '16:9': { width: 1920, height: 1080 }
+  '4:5': { width: 896, height: 1115 }  // 4:5 비율 (896 × 1115)
 }
 
 export async function resizeImageToCanvas(
@@ -48,7 +46,7 @@ export async function resizeImageToCanvas(
         console.log(`📏 원본 이미지 크기: ${img.width}x${img.height}`);
         console.log(`🎯 목표 캔버스 크기: ${targetDimensions.width}x${targetDimensions.height}`);
         
-        // 이미지를 캔버스에 맞게 리사이징 (object-cover 방식)
+        // 이미지를 캔버스에 맞게 리사이징 (object-contain 방식 - 비율 유지하면서 전체 표시)
         const imgAspect = img.width / img.height
         const canvasAspect = targetDimensions.width / targetDimensions.height
         
@@ -60,22 +58,22 @@ export async function resizeImageToCanvas(
         let offsetY = 0
         
         if (imgAspect > canvasAspect) {
-          // 이미지가 더 넓음 - 높이에 맞추고 좌우 크롭
-          drawWidth = drawHeight * imgAspect
-          offsetX = (targetDimensions.width - drawWidth) / 2
-        } else {
-          // 이미지가 더 높음 - 너비에 맞추고 상하 크롭
-          drawHeight = drawWidth / imgAspect
+          // 이미지가 더 넓음 - 너비에 맞추고 위아래 여백 추가
+          drawHeight = targetDimensions.width / imgAspect
           offsetY = (targetDimensions.height - drawHeight) / 2
+        } else {
+          // 이미지가 더 높음 - 높이에 맞추고 좌우 여백 추가
+          drawWidth = targetDimensions.height * imgAspect
+          offsetX = (targetDimensions.width - drawWidth) / 2
         }
         
-        console.log(`🔧 그리기 설정 - 크기: ${drawWidth}x${drawHeight}, 오프셋: (${offsetX}, ${offsetY})`);
+        console.log(`🔧 그리기 설정 - 크기: ${drawWidth.toFixed(1)}x${drawHeight.toFixed(1)}, 오프셋: (${offsetX.toFixed(1)}, ${offsetY.toFixed(1)})`);
         
-        // 흰색 배경으로 채우기
+        // 흰색 배경으로 채우기 (여백 부분)
         ctx.fillStyle = 'white'
         ctx.fillRect(0, 0, targetDimensions.width, targetDimensions.height)
         
-        // 이미지 그리기 (object-cover 스타일)
+        // 이미지 그리기 (object-contain 스타일 - 전체 이미지가 보이도록)
         ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight)
         
         // WebP 포맷으로 압축 출력

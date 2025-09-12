@@ -6,6 +6,12 @@ import { prisma } from "@/lib/db/prisma";
  * 프롬프트에서 자동으로 캐릭터를 인식하여 매칭
  */
 
+// 비율별 레퍼런스 이미지 타입
+export interface RatioImages {
+  '1:1': string[];
+  '4:5': string[];
+}
+
 // 캐릭터 정보 타입
 export interface CharacterReference {
   id: string;
@@ -30,11 +36,7 @@ export interface CharacterReference {
   };
   personality: string;             // 성격 (표정 생성에 도움)
   referenceImages: string[];       // 원본 레퍼런스 이미지 URL들
-  ratioImages?: {                  // 비율별 이미지 (사전 생성됨)
-    '1:1': string[];
-    '4:5': string[];
-    '16:9': string[];
-  };
+  ratioImages?: RatioImages;       // 비율별 처리된 이미지들
   lastUsed: Date;
   userId: string;
 }
@@ -44,42 +46,59 @@ export class CharacterReferenceManager {
   private nameToIdMap: Map<string, string> = new Map(); // 이름 -> ID 매핑
   
   /**
-   * 캐릭터 등록
+   * Supabase 클라이언트를 사용한 쿼리 실행
+   */
+  private async getSupabaseClient() {
+    const { createClient } = await import('@supabase/supabase-js');
+    // 서버사이드에서는 SERVICE_ROLE_KEY 사용 (RLS 우회)
+    return createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+  }
+  
+  /**
+   * 캐릭터 등록 (비율별 이미지 처리 포함)
    */
   async registerCharacter(
     userId: string,
     character: Omit<CharacterReference, "id" | "lastUsed" | "userId">
   ): Promise<string> {
     try {
-      // DB에 저장
+      console.log(`🎭 캐릭터 등록 시작: ${character.name}`);
+      
+      // 1. 먼저 기본 캐릭터 정보를 DB에 저장
       const saved = await prisma.character.create({
         data: {
           userId,
           name: character.name,
           description: character.description,
           referenceImages: character.referenceImages,
-          metadata: {
-            aliases: character.aliases,
-            visualFeatures: character.visualFeatures,
-            clothing: character.clothing,
-            personality: character.personality,
-          },
+          thumbnailUrl: character.referenceImages[0] || null,
         },
       });
+
+      console.log(`✅ 캐릭터 기본 정보 저장 완료: ${saved.id}`);
+
+      // 2. 비율별 이미지 처리는 별도의 API로 처리 (향후 구현)
+      console.log(`🔄 비율별 이미지 처리는 별도 API에서 처리됩니다 (캐릭터 ${saved.id})`);
+      // TODO: /api/characters/process-images API 구현하여 백그라운드에서 처리
       
-      // 캐시에 저장
+      // 3. 캐시에 저장 (ratioImages는 나중에 업데이트)
       const fullCharacter: CharacterReference = {
         ...character,
         id: saved.id,
         userId,
         lastUsed: new Date(),
+        ratioImages: undefined // 처리 중이므로 undefined
       };
       
       this.characterCache.set(saved.id, fullCharacter);
       
-      // 이름 매핑 업데이트
+      // 4. 이름 매핑 업데이트
       this.updateNameMappings(fullCharacter);
       
+      console.log(`🎉 캐릭터 등록 완료: ${saved.id} (비율별 이미지는 백그라운드에서 처리 중)`);
       return saved.id;
     } catch (error) {
       console.error("Character registration error:", error);
@@ -302,13 +321,13 @@ ${enhancedPrompt}
   }
   
   /**
-   * 선택된 캐릭터 ID들로 프롬프트 향상 (비율별 이미지 지원)
+   * 선택된 캐릭터 ID들로 프롬프트 향상 (프로젝트 비율 맞춤)
    */
   async enhancePromptWithSelectedCharacters(
     userId: string,
     originalPrompt: string,
     selectedCharacterIds: string[],
-    aspectRatio?: '1:1' | '4:5' | '16:9'
+    projectRatio?: '4:5' | '1:1' | '16:9'
   ): Promise<{
     enhancedPrompt: string;
     detectedCharacters: CharacterReference[];
@@ -328,6 +347,7 @@ ${enhancedPrompt}
     }
     
     console.log(`🎯 선택된 캐릭터 로딩 완료: ${selectedCharacters.length}/${selectedCharacterIds.length}개`);
+    console.log(`📐 프로젝트 비율: ${projectRatio || '기본값'}`);
     
     // 캐릭터 설명 생성
     let characterDescriptions = "";
@@ -336,16 +356,9 @@ ${enhancedPrompt}
     selectedCharacters.forEach(character => {
       characterDescriptions += this.buildCharacterDescriptionForAI(character) + "\n\n";
       
-      // 🚀 비율별 이미지 사용 (사전 생성된 이미지 우선)
-      if (aspectRatio && character.ratioImages && character.ratioImages[aspectRatio]) {
-        // 사전 생성된 비율별 이미지 사용 (최대 3개)
-        referenceImages.push(...character.ratioImages[aspectRatio].slice(0, 3));
-        console.log(`✅ Using pre-processed ${aspectRatio} ratio images for character ${character.name}`);
-      } else {
-        // 폴백: 원본 이미지 사용 (최대 3개)
-        referenceImages.push(...character.referenceImages.slice(0, 3));
-        console.log(`⚠️ Using original images for character ${character.name} (ratio ${aspectRatio} not available)`);
-      }
+      // ⭐ 핵심: 프로젝트 비율에 맞는 레퍼런스 이미지 선택
+      const ratioSpecificImages = this.selectRatioSpecificImages(character, projectRatio);
+      referenceImages.push(...ratioSpecificImages);
     });
     
     // 향상된 프롬프트 생성
@@ -363,8 +376,11 @@ ${characterDescriptions}
 위에 명시된 캐릭터들은 제공된 레퍼런스 이미지와 정확히 일치해야 합니다.
 각 캐릭터의 고유한 특징을 반드시 유지하세요.
 레퍼런스 이미지의 스타일과 외형을 그대로 따라주세요.
+현재 비율(${projectRatio || '기본'})에 최적화된 구도로 생성하세요.
 `;
     }
+    
+    console.log(`📸 비율별 레퍼런스 이미지 선택 완료: ${referenceImages.length}개`);
     
     return {
       enhancedPrompt,
@@ -375,37 +391,128 @@ ${characterDescriptions}
   }
 
   /**
-   * 사용자의 모든 캐릭터 로드
+   * 프로젝트 비율에 맞는 캐릭터 레퍼런스 이미지 선택
+   */
+  private selectRatioSpecificImages(
+    character: CharacterReference, 
+    projectRatio?: '4:5' | '1:1' | '16:9'
+  ): string[] {
+    // ratioImages가 있고 프로젝트 비율이 지정되어 있다면 해당 비율 이미지 사용
+    if (character.ratioImages && projectRatio) {
+      const ratioKey = projectRatio === '16:9' ? '4:5' : projectRatio; // 16:9는 4:5 이미지 사용
+      const ratioSpecificImages = character.ratioImages[ratioKey];
+      
+      if (ratioSpecificImages && ratioSpecificImages.length > 0) {
+        console.log(`🎯 캐릭터 ${character.name}: ${ratioKey} 비율 이미지 ${ratioSpecificImages.length}개 사용`);
+        return ratioSpecificImages.slice(0, 3); // 최대 3개
+      } else {
+        console.warn(`⚠️ 캐릭터 ${character.name}: ${ratioKey} 비율 이미지가 없어서 원본 이미지 사용`);
+      }
+    }
+    
+    // ratioImages가 없거나 비율이 지정되지 않았다면 원본 이미지 사용
+    console.log(`📷 캐릭터 ${character.name}: 원본 이미지 ${character.referenceImages.length}개 사용`);
+    return character.referenceImages.slice(0, 3); // 최대 3개
+  }
+
+  /**
+   * 캐시 초기화
+   */
+  clearCache(): void {
+    console.log(`🗑️ 캐릭터 캐시 초기화`);
+    this.characterCache.clear();
+    this.nameToIdMap.clear();
+  }
+
+  /**
+   * 사용자의 모든 캐릭터 로드 (ratioImages 포함)
    */
   async loadUserCharacters(userId: string): Promise<void> {
     try {
-      const characters = await prisma.character.findMany({
-        where: { userId },
-      });
+      // 캐시 초기화 (최신 데이터 보장)
+      this.clearCache();
+      
+      // Supabase 클라이언트를 사용하여 데이터 조회 (Prisma 연결 문제 우회)
+      console.log(`📚 사용자 캐릭터 로딩 시작: userId=${userId}`);
+
+      const supabase = await this.getSupabaseClient();
+
+      // 1. 실제 사용자 조회 (실제 서비스 준비 완료)
+      const { data: users, error: userError } = await supabase
+        .from('user')
+        .select('id, supabaseId')
+        .eq('supabaseId', userId)
+        .limit(1);
+        
+      if (userError || !users || users.length === 0) {
+        console.warn(`⚠️ 사용자를 찾을 수 없음: ${userId}`, userError);
+        console.log(`📚 사용자 캐릭터 로딩 완료: 0개 (사용자 없음)`);
+        return;
+      }
+      
+      const targetUserId = users[0].id;
+      console.log(`👤 사용자 확인: ${users[0].supabaseId} -> ${targetUserId}`);
+
+      // 2. 해당 사용자의 캐릭터들 조회
+      const { data: characters, error: characterError } = await supabase
+        .from('character')
+        .select('*')
+        .eq('userId', targetUserId)
+        .order('createdAt', { ascending: false });
+
+      if (characterError) {
+        console.error('캐릭터 조회 오류:', characterError);
+        console.log(`📚 사용자 캐릭터 로딩 완료: 0개 (오류 발생)`);
+        return;
+      }
+
+      if (!characters || characters.length === 0) {
+        console.log(`📚 사용자 캐릭터 로딩 완료: 0개`);
+        return;
+      }
       
       characters.forEach(char => {
-        const metadata = char.metadata as any;
+        const metadata = (char as any).metadata as any;
+        const ratioImages = (char as any).ratioImages as RatioImages | null;
         
         const characterRef: CharacterReference = {
           id: char.id,
           name: char.name,
-          aliases: metadata?.aliases || [],
+          aliases: metadata?.aliases || [char.name], // 기본값으로 이름 추가
           description: char.description,
-          visualFeatures: metadata?.visualFeatures || {},
+          visualFeatures: metadata?.visualFeatures || {
+            hairColor: "",
+            hairStyle: "",
+            eyeColor: "",
+            faceShape: "",
+            bodyType: "",
+            height: "",
+            age: "",
+            gender: "",
+            skinTone: "",
+            distinctiveFeatures: []
+          },
           clothing: metadata?.clothing || { default: "", variations: [] },
           personality: metadata?.personality || "",
           referenceImages: char.referenceImages as string[] || [],
+          ratioImages: ratioImages || undefined,
           lastUsed: char.updatedAt,
           userId: char.userId,
         };
         
         this.characterCache.set(char.id, characterRef);
         this.updateNameMappings(characterRef);
+        
+        console.log(`🎭 캐릭터 로드: ${char.name} (${char.id}), 레퍼런스 이미지: ${characterRef.referenceImages.length}개, 비율별 이미지: ${ratioImages ? Object.keys(ratioImages).length : 0}개`);
       });
+      
+      console.log(`📚 사용자 캐릭터 로딩 완료: ${characters.length}개`);
     } catch (error) {
       console.error("Error loading user characters:", error);
+      console.log(`📚 사용자 캐릭터 로딩 완료: 0개 (오류 발생)`);
     }
   }
+
   
   /**
    * 캐릭터 정보 업데이트
@@ -442,13 +549,7 @@ ${characterDescriptions}
         data: {
           name: updated.name,
           description: updated.description,
-          referenceImages: updated.referenceImages,
-          metadata: {
-            aliases: updated.aliases,
-            visualFeatures: updated.visualFeatures,
-            clothing: updated.clothing,
-            personality: updated.personality,
-          },
+          referenceImages: updated.referenceImages as any,
         },
       });
     } catch (error) {

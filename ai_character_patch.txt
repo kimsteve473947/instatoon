@@ -1,0 +1,199 @@
+// AI Character generation variables (add to state section around line 210-220)
+const [characterDescription, setCharacterDescription] = useState('');
+const [generatedCharacterUrl, setGeneratedCharacterUrl] = useState<string | null>(null);
+const [isGeneratingCharacter, setIsGeneratingCharacter] = useState(false);
+const [isAddingCharacterToDB, setIsAddingCharacterToDB] = useState(false);
+
+// AI Character generation functions (add after handleTemplateDragEnd around line 1370-1380)
+const handleGenerateCharacter = useCallback(async () => {
+  if (!characterDescription.trim()) {
+    alert('캐릭터 설명을 입력해주세요.');
+    return;
+  }
+
+  try {
+    setIsGeneratingCharacter(true);
+    
+    const response = await fetch('/api/ai/character/generate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        prompt: characterDescription,
+        style: 'character_reference',
+        aspectRatio: '1:1'
+      })
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'AI 캐릭터 생성에 실패했습니다.');
+    }
+
+    const result = await response.json();
+    setGeneratedCharacterUrl(result.imageUrl);
+    
+  } catch (error) {
+    console.error('캐릭터 생성 실패:', error);
+    alert(error instanceof Error ? error.message : '캐릭터 생성 중 오류가 발생했습니다.');
+  } finally {
+    setIsGeneratingCharacter(false);
+  }
+}, [characterDescription]);
+
+const handleAddCharacterToDB = useCallback(async () => {
+  if (!generatedCharacterUrl) return;
+
+  try {
+    setIsAddingCharacterToDB(true);
+    
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      throw new Error('로그인이 필요합니다');
+    }
+
+    const { data: userData } = await supabase
+      .from('user')
+      .select('id')
+      .eq('supabaseId', user.id)
+      .single();
+
+    if (!userData) {
+      throw new Error('사용자 정보를 찾을 수 없습니다');
+    }
+
+    let ratioImages: any = null;
+    
+    try {
+      const processingResponse = await fetch('/api/characters/process-images', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          referenceImages: [generatedCharacterUrl],
+          userId: userData.id
+        })
+      });
+
+      const processingResult = await processingResponse.json();
+      
+      if (processingResult.success && processingResult.ratioImages) {
+        ratioImages = processingResult.ratioImages;
+      }
+    } catch (processingError) {
+      console.error('Multi-ratio processing API error:', processingError);
+    }
+
+    const characterName = characterDescription.split(',')[0].trim().substring(0, 20) || '새 캐릭터';
+
+    const { data: character, error } = await supabase
+      .from('character')
+      .insert({
+        userId: userData.id,
+        name: characterName,
+        description: characterDescription.trim(),
+        referenceImages: [generatedCharacterUrl],
+        ratioImages: ratioImages,
+        thumbnailUrl: generatedCharacterUrl,
+        isPublic: false,
+        isFavorite: false
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    setCharacterDescription('');
+    setGeneratedCharacterUrl(null);
+    alert('캐릭터가 성공적으로 추가되었습니다!');
+    
+  } catch (error) {
+    console.error('캐릭터 추가 실패:', error);
+    alert(error instanceof Error ? error.message : '캐릭터 추가 중 오류가 발생했습니다.');
+  } finally {
+    setIsAddingCharacterToDB(false);
+  }
+}, [generatedCharacterUrl, characterDescription, supabase]);
+
+// UI Replacement (replace the AI character section around line 2124-2141)
+{activeTab === 'ai-character' && (
+  <div className="space-y-4">
+    <div className="space-y-2">
+      <label className="text-sm font-medium text-slate-700">
+        캐릭터 설명 <span className="text-red-500">*</span>
+      </label>
+      <Textarea 
+        value={characterDescription}
+        onChange={(e) => setCharacterDescription(e.target.value.substring(0, 300))}
+        placeholder="캐릭터의 외모와 특징을 설명해주세요..."
+        className="min-h-[100px] text-sm resize-none border-slate-200"
+        maxLength={300}
+      />
+      <div className="flex justify-between items-center text-xs text-gray-500">
+        <span>자세히 입력할수록 좋은 캐릭터가 생성돼요!</span>
+        <span>{characterDescription.length}/300</span>
+      </div>
+    </div>
+
+    <div className="space-y-2">
+      <label className="text-sm font-medium text-slate-700">
+        가로 세로 비율
+      </label>
+      <div className="p-3 border-2 border-green-300 bg-green-50 rounded-lg text-center">
+        <div className="text-lg font-medium text-green-700">1:1</div>
+      </div>
+    </div>
+
+    <Button 
+      onClick={handleGenerateCharacter}
+      disabled={isGeneratingCharacter || !characterDescription.trim()}
+      className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700" 
+      size="sm"
+    >
+      {isGeneratingCharacter ? (
+        <>
+          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+          생성 중...
+        </>
+      ) : (
+        <>
+          <Sparkles className="h-4 w-4 mr-2" />
+          캐릭터 생성
+        </>
+      )}
+    </Button>
+
+    {generatedCharacterUrl && (
+      <div className="space-y-3">
+        <div className="relative">
+          <img
+            src={generatedCharacterUrl}
+            alt="생성된 캐릭터"
+            className="w-full rounded-lg border border-slate-200"
+          />
+        </div>
+        
+        <Button
+          onClick={handleAddCharacterToDB}
+          disabled={isAddingCharacterToDB}
+          className="w-full bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700"
+          size="sm"
+        >
+          {isAddingCharacterToDB ? (
+            <>
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              캐릭터 추가 중...
+            </>
+          ) : (
+            <>
+              <Plus className="h-4 w-4 mr-2" />
+              캐릭터 추가하기
+            </>
+          )}
+        </Button>
+      </div>
+    )}
+  </div>
+)}

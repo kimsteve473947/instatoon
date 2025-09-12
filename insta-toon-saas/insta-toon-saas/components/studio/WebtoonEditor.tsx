@@ -108,6 +108,7 @@ export function WebtoonEditor({ panelId, backgroundImage, onSave }: WebtoonEdito
       y: 0
     }] : [],
     selectedLayerId: null,
+    canvasRatio: '1:1' as CanvasRatio,
     canvasWidth: 800,
     canvasHeight: 800,
     zoom: 1,

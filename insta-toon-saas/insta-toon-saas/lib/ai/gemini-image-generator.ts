@@ -5,6 +5,9 @@ const genAI = new GoogleGenAI({
   apiKey: process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || ""
 });
 
+// 이미지 생성을 위한 모델
+const imageModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash-image-preview" });
+
 // 웹툰 전용 프롬프트 템플릿
 export class WebtoonPromptTemplate {
   private static readonly BASE_SYSTEM_PROMPT = `
@@ -222,7 +225,7 @@ Optimized prompt (be specific about visual elements, composition, and mood):
 `;
 
       const result = await imageModel.generateContent(optimizationRequest);
-      const response = result.response;
+      const response = await result.response;
       return response.text().trim();
     } catch (error) {
       console.error("Prompt optimization error:", error);
@@ -269,7 +272,7 @@ Optimized prompt (be specific about visual elements, composition, and mood):
         contents: `Generate image: ${finalPrompt}`
       });
       
-      const response = result.response;
+      const response = await result.response;
       
       // 5. 생성된 이미지 처리
       // 실제 구현시 Gemini의 이미지 생성 응답 처리

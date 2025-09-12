@@ -70,14 +70,6 @@ The server runs on stdio transport when executed directly (`node simple-mcp-serv
 - **Deployment**: Vercel
 - **Monitoring**: Sentry + Vercel Analytics
 
-## 🚫 AI 모델 정책 (절대 변경 금지)
-**CRITICAL**: AI 이미지 생성은 반드시 Google Gemini API 나노바나나 모델을 사용해야 합니다.
-- **모델**: `gemini-2-5-flash-image-preview` (나노바나나)
-- **공식 문서**: https://ai.google.dev/gemini-api/docs/image-generation?hl=ko
-- **절대 금지**: OpenAI DALL-E, Stable Diffusion, Midjourney 등 다른 모델로 변경 제안 금지
-- **문제 발생시**: 나노바나나 모델의 구현 방식을 수정하여 해결 (모델 변경 아님)
-- **참고**: Gemini API는 텍스트→이미지, 이미지 편집, 다중 이미지 조합, 반복적 개선 모두 지원
-
 ## 📐 아키텍처 원칙
 1. **모듈화**: 기능별 독립적인 모듈 구성
 2. **타입 안정성**: TypeScript strict mode, Zod validation

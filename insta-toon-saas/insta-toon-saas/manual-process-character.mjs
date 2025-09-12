@@ -40,8 +40,8 @@ const characterData = {
 
 // Ratio dimensions
 const RATIO_DIMENSIONS = {
-  '1:1': { width: 1024, height: 1024 },
-  '4:5': { width: 1024, height: 1280 },
+  '1:1': { width: 1080, height: 1080 },
+  '4:5': { width: 1080, height: 1350 },
   '16:9': { width: 1920, height: 1080 }
 };
 

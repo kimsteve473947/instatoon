@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { processCharacterImages } from "@/lib/services/character-image-processor";
 
 // 캐릭터 등록
 export async function POST(request: NextRequest) {
@@ -23,7 +22,8 @@ export async function POST(request: NextRequest) {
       visualFeatures,
       clothing,
       personality,
-      referenceImages = []
+      referenceImages = [],
+      ratioImages = null
     } = body;
 
     // 필수 필드 검증
@@ -76,6 +76,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // metadata 구성
+    const metadata = {
+      aliases: allAliases,
+      visualFeatures: visualFeatures || {
+        hairColor: "",
+        hairStyle: "",
+        eyeColor: "",
+        faceShape: "",
+        bodyType: "",
+        height: "",
+        age: "",
+        gender: "",
+        skinTone: "",
+        distinctiveFeatures: []
+      },
+      clothing: clothing || {
+        default: "",
+        variations: []
+      },
+      personality: personality || ""
+    };
+
     // 캐릭터 등록
     const { data: character, error: insertError } = await supabase
       .from('character')
@@ -85,6 +107,8 @@ export async function POST(request: NextRequest) {
         description,
         styleGuide: personality || "",
         referenceImages: referenceImages || [],
+        ratioImages: ratioImages, // 비율별 이미지 추가
+        metadata: metadata, // metadata 저장 추가
         thumbnailUrl: referenceImages && referenceImages.length > 0 ? referenceImages[0] : null,
       })
       .select()
@@ -94,42 +118,10 @@ export async function POST(request: NextRequest) {
       throw insertError;
     }
 
-    // 🎨 참조 이미지가 있으면 비율별 이미지 처리 시작 (백그라운드)
-    let imageProcessingResult = null;
-    if (referenceImages && referenceImages.length > 0) {
-      console.log(`🚀 Starting background image processing for character ${character.id}`);
-      
-      try {
-        imageProcessingResult = await processCharacterImages(referenceImages, character.id);
-        
-        if (imageProcessingResult.success && imageProcessingResult.ratioImages) {
-          // DB에 비율별 이미지 업데이트
-          const { error: updateError } = await supabase
-            .from('character')
-            .update({ ratioImages: imageProcessingResult.ratioImages })
-            .eq('id', character.id);
-          
-          if (updateError) {
-            console.error(`❌ Failed to save ratio images for character ${character.id}:`, updateError);
-          } else {
-            console.log(`✅ Successfully saved ratio images for character ${character.id}`);
-          }
-        }
-      } catch (processingError) {
-        console.error(`⚠️ Image processing failed for character ${character.id}:`, processingError);
-        // 이미지 처리 실패해도 캐릭터 생성은 성공으로 처리
-      }
-    }
-
     return NextResponse.json({
       success: true,
       characterId: character.id,
       message: `캐릭터 '${name}'이(가) 등록되었습니다`,
-      imageProcessing: imageProcessingResult ? {
-        processed: imageProcessingResult.success,
-        processedCount: imageProcessingResult.processedCount,
-        error: imageProcessingResult.error
-      } : null,
       aliases: allAliases,
     });
 
@@ -193,6 +185,7 @@ export async function GET(request: NextRequest) {
       description: char.description,
       styleGuide: char.styleGuide,
       referenceImages: char.referenceImages as string[],
+      ratioImages: char.ratioImages, // 비율별 이미지 추가
       thumbnailUrl: char.thumbnailUrl,
       isFavorite: char.isFavorite,
       createdAt: char.createdAt,
@@ -259,7 +252,19 @@ export async function PUT(request: NextRequest) {
       updateData.referenceImages = updates.referenceImages;
       updateData.thumbnailUrl = updates.referenceImages.length > 0 ? updates.referenceImages[0] : null;
     }
+    if (updates.ratioImages !== undefined) updateData.ratioImages = updates.ratioImages; // 비율별 이미지 업데이트
     if (updates.isFavorite !== undefined) updateData.isFavorite = updates.isFavorite;
+    
+    // metadata 업데이트 (visualFeatures, clothing, personality, aliases 등)
+    if (updates.visualFeatures || updates.clothing || updates.personality || updates.aliases) {
+      const metadata: any = {};
+      if (updates.aliases) metadata.aliases = updates.aliases;
+      if (updates.visualFeatures) metadata.visualFeatures = updates.visualFeatures;
+      if (updates.clothing) metadata.clothing = updates.clothing;
+      if (updates.personality) metadata.personality = updates.personality;
+      updateData.metadata = metadata;
+    }
+    
     updateData.updatedAt = new Date().toISOString();
 
     const { error: updateError } = await supabase

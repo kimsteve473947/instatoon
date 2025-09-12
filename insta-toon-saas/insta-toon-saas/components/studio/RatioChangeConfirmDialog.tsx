@@ -16,12 +16,11 @@ import {
   AlertTriangle
 } from "lucide-react";
 
-type CanvasRatio = '4:5' | '1:1' | '16:9';
+type CanvasRatio = '4:5' | '1:1';
 
 const CANVAS_SIZES = {
-  '4:5': { label: '세로형', actualWidth: 1024, actualHeight: 1280 },
-  '1:1': { label: '정사각형', actualWidth: 1024, actualHeight: 1024 },
-  '16:9': { label: '가로형', actualWidth: 1920, actualHeight: 1080 }
+  '4:5': { label: '세로형', actualWidth: 1080, actualHeight: 1350 },
+  '1:1': { label: '정사각형', actualWidth: 1080, actualHeight: 1080 },
 };
 
 interface RatioChangeConfirmDialogProps {
@@ -64,8 +63,6 @@ export function RatioChangeConfirmDialog({
         return <RectangleVertical className="h-5 w-5" />;
       case '1:1':
         return <Square className="h-5 w-5" />;
-      case '16:9':
-        return <Square className="h-5 w-5 rotate-90" />;
     }
   };
 

@@ -30,7 +30,7 @@ export function bytesToGB(bytes: number): number {
 
 // 사용자의 스토리지 정보 가져오기
 export async function getUserStorage(userId: string) {
-  const supabase = createClient()
+  const supabase = await createClient()
   
   const { data, error } = await supabase
     .from('user_storage')
@@ -61,7 +61,7 @@ export async function getUserStorage(userId: string) {
 
 // 멤버십에 따른 최대 용량 업데이트
 export async function updateStorageLimit(userId: string, membership: MembershipType) {
-  const supabase = createClient()
+  const supabase = await createClient()
   
   const maxBytes = STORAGE_LIMITS[membership]
   
@@ -106,7 +106,7 @@ export async function updateStorageUsage(
   fileSize: number,
   operation: 'add' | 'remove' = 'add'
 ) {
-  const supabase = createClient()
+  const supabase = await createClient()
   
   const storage = await getUserStorage(userId)
   
@@ -144,7 +144,7 @@ export async function saveFileMetadata(
   fileType: string,
   mimeType: string
 ) {
-  const supabase = createClient()
+  const supabase = await createClient()
   
   const { data, error } = await supabase
     .from('file_metadata')
@@ -166,7 +166,7 @@ export async function saveFileMetadata(
 
 // 파일 삭제 시 메타데이터 소프트 삭제
 export async function deleteFileMetadata(fileId: string) {
-  const supabase = createClient()
+  const supabase = await createClient()
   
   const { data, error } = await supabase
     .from('file_metadata')
@@ -181,7 +181,7 @@ export async function deleteFileMetadata(fileId: string) {
 
 // 프로젝트의 총 용량 계산
 export async function getProjectStorageUsage(projectId: string): Promise<number> {
-  const supabase = createClient()
+  const supabase = await createClient()
   
   const { data, error } = await supabase
     .from('file_metadata')
@@ -196,7 +196,7 @@ export async function getProjectStorageUsage(projectId: string): Promise<number>
 
 // 사용자의 스토리지 통계
 export async function getStorageStats(userId: string) {
-  const supabase = createClient()
+  const supabase = await createClient()
   
   // 스토리지 정보
   const storage = await getUserStorage(userId)

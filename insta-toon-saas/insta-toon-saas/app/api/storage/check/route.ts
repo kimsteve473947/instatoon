@@ -4,7 +4,7 @@ import { getUserStorage, canUploadFile, formatBytes } from '@/lib/storage/storag
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createClient()
+    const supabase = await createClient()
     
     // 사용자 인증 확인
     const { data: { user } } = await supabase.auth.getUser()
@@ -49,7 +49,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createClient()
+    const supabase = await createClient()
     const { fileSize } = await request.json()
     
     if (!fileSize || fileSize < 0) {

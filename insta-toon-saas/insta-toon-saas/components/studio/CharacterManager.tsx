@@ -1,29 +1,13 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { Upload, X, Star, Plus, Trash2, MoreVertical } from "lucide-react";
+import { Upload, X, Star, Plus } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Character } from "@/types";
 import { formatFileSize, formatRelativeTime } from "@/lib/utils";
 
@@ -51,7 +35,6 @@ export function CharacterManager({
   });
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
-  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   // 파일 업로드 처리
   const handleFileUpload = useCallback((files: FileList | null) => {
@@ -123,12 +106,6 @@ export function CharacterManager({
     });
     setUploadedFiles([]);
     setIsAddingCharacter(false);
-  };
-
-  // 캐릭터 삭제 확인
-  const handleDeleteCharacter = (characterId: string) => {
-    onCharacterRemove(characterId);
-    setDeleteConfirmId(null);
   };
 
   return (
@@ -247,7 +224,7 @@ export function CharacterManager({
       
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {characters.map((character) => (
-          <Card key={character.id} className="relative group">
+          <Card key={character.id} className="relative">
             <CardHeader>
               <div className="flex items-start justify-between">
                 <div>
@@ -268,29 +245,16 @@ export function CharacterManager({
                       }`}
                     />
                   </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => onCharacterRemove(character.id)}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
                 </div>
               </div>
             </CardHeader>
-
-            {/* 호버 시 표시되는 삭제 메뉴 */}
-            <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0 bg-white shadow-sm">
-                    <MoreVertical className="h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem 
-                    onClick={() => setDeleteConfirmId(character.id)}
-                    className="text-red-600"
-                  >
-                    <Trash2 className="h-4 w-4 mr-2" />
-                    쓰레기통으로 이동
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
             <CardContent>
               {character.thumbnailUrl && (
                 <div className="aspect-square bg-gray-100 rounded-md mb-3 overflow-hidden">
@@ -313,27 +277,6 @@ export function CharacterManager({
           </Card>
         ))}
       </div>
-
-      {/* 삭제 확인 모달 */}
-      <AlertDialog open={deleteConfirmId !== null} onOpenChange={(open: boolean) => !open && setDeleteConfirmId(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>캐릭터를 쓰레기통으로 이동하시겠습니까?</AlertDialogTitle>
-            <AlertDialogDescription>
-              이 캐릭터가 쓰레기통으로 이동됩니다. 쓰레기통에서 복원하거나 완전히 삭제할 수 있습니다.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>취소</AlertDialogCancel>
-            <AlertDialogAction 
-              onClick={() => deleteConfirmId && handleDeleteCharacter(deleteConfirmId)}
-              className="bg-red-600 hover:bg-red-700"
-            >
-              쓰레기통으로 이동
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }

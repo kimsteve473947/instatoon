@@ -23,11 +23,6 @@ import { ko } from 'date-fns/locale'
 interface DashboardStats {
   projectCount: number
   tokenBalance: number
-  tokenUsed: number
-  tokenTotal: number
-  dailyUsed: number
-  dailyLimit: number
-  estimatedImagesRemaining: number
   storageUsed: number
   recentProjects: Array<{
     id: string
@@ -84,36 +79,9 @@ export default function DashboardPage() {
         })
       )
 
-      // 토큰 정보 가져오기
-      let tokenData = {
-        balance: 0,
-        used: 0,
-        total: 0,
-        dailyUsed: 0,
-        dailyLimit: 0,
-        estimatedImagesRemaining: 0
-      }
-
-      try {
-        const tokenResponse = await fetch('/api/tokens/balance')
-        if (tokenResponse.ok) {
-          const tokenResult = await tokenResponse.json()
-          if (tokenResult.success) {
-            tokenData = tokenResult.balance
-          }
-        }
-      } catch (error) {
-        console.error('Failed to load token data:', error)
-      }
-
       setStats({
         projectCount: count || 0,
-        tokenBalance: tokenData.balance,
-        tokenUsed: tokenData.used,
-        tokenTotal: tokenData.total,
-        dailyUsed: tokenData.dailyUsed,
-        dailyLimit: tokenData.dailyLimit,
-        estimatedImagesRemaining: tokenData.estimatedImagesRemaining,
+        tokenBalance: 0, // TODO: 토큰 잔액 API 연동
         storageUsed: 0, // StorageUsage 컴포넌트에서 별도 처리
         recentProjects: projectsWithPanels
       })
@@ -183,26 +151,12 @@ export default function DashboardPage() {
               <Sparkles className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-purple-600">
+              <div className="text-2xl font-bold">
                 {stats?.tokenBalance?.toLocaleString() || '0'}
               </div>
-              <div className="text-xs text-gray-500 mb-2">
-                전체 {stats?.tokenTotal?.toLocaleString() || '0'} 중 {stats?.tokenUsed?.toLocaleString() || '0'} 사용
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-2 mb-2">
-                <div 
-                  className="bg-gradient-to-r from-purple-500 to-pink-500 h-2 rounded-full transition-all"
-                  style={{ width: `${stats?.tokenTotal ? Math.min((stats.tokenUsed / stats.tokenTotal) * 100, 100) : 0}%` }}
-                ></div>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-green-600">
-                  약 {stats?.estimatedImagesRemaining || 0}장 생성 가능
-                </span>
-                <Link href="/pricing" className="text-xs text-purple-600 hover:text-purple-700">
-                  충전하기 →
-                </Link>
-              </div>
+              <Link href="/pricing" className="text-xs text-purple-600 hover:text-purple-700">
+                토큰 충전하기 →
+              </Link>
             </CardContent>
           </Card>
 
@@ -222,27 +176,19 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
 
-          {/* 일일 사용량 */}
+          {/* 이번 달 생성 */}
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">
-                오늘 사용량
+                이번 달 생성
               </CardTitle>
               <TrendingUp className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">
-                {stats?.dailyUsed || 0}
-              </div>
-              <div className="text-xs text-gray-500 mb-2">
-                일일 한도 {stats?.dailyLimit?.toLocaleString() || '0'} 중
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-2">
-                <div 
-                  className="bg-gradient-to-r from-orange-500 to-red-500 h-2 rounded-full transition-all"
-                  style={{ width: `${stats?.dailyLimit ? Math.min((stats.dailyUsed / stats.dailyLimit) * 100, 100) : 0}%` }}
-                ></div>
-              </div>
+              <div className="text-2xl font-bold">0</div>
+              <p className="text-xs text-muted-foreground">
+                패널 생성됨
+              </p>
             </CardContent>
           </Card>
         </div>

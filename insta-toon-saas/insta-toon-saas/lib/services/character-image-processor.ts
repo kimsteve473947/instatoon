@@ -1,8 +1,8 @@
 /**
  * 캐릭터 이미지 다중 비율 처리 서비스
  * 
- * 캐릭터 등록 시점에 원본 이미지를 1:1, 4:5, 16:9 비율로 변환하여
- * 하얀 배경 패딩을 추가한 이미지를 생성하고 저장하는 서비스
+ * 캐릭터 등록 시점에 원본 이미지를 1:1, 4:5 비율로 변환하여
+ * 가운데 기준 크롭(center crop) 방식으로 이미지를 생성하고 저장하는 서비스
  */
 
 import { put } from '@vercel/blob';
@@ -10,8 +10,7 @@ import Sharp from 'sharp';
 
 export interface RatioImages {
   '1:1': string[];
-  '4:5': string[];  
-  '16:9': string[];
+  '4:5': string[];
 }
 
 export interface ImageProcessingResult {
@@ -21,11 +20,10 @@ export interface ImageProcessingResult {
   processedCount?: number;
 }
 
-// 비율별 권장 크기 정의
+// 비율별 권장 크기 정의 (center crop 방식)
 const RATIO_DIMENSIONS = {
   '1:1': { width: 1024, height: 1024 },
-  '4:5': { width: 1024, height: 1280 },
-  '16:9': { width: 1920, height: 1080 }
+  '4:5': { width: 896, height: 1115 }  // 4:5 비율 (896 × 1115)
 } as const;
 
 /**
@@ -40,8 +38,7 @@ export async function processCharacterImages(
     
     const ratioImages: RatioImages = {
       '1:1': [],
-      '4:5': [],
-      '16:9': []
+      '4:5': []
     };
 
     let processedCount = 0;
@@ -50,14 +47,14 @@ export async function processCharacterImages(
       const imageUrl = originalImages[i];
       console.log(`📸 Processing image ${i + 1}/${originalImages.length}: ${imageUrl.slice(0, 50)}...`);
       
-      // 각 비율로 변환
-      for (const ratio of ['1:1', '4:5', '16:9'] as const) {
+      // 각 비율로 변환 (1:1, 4:5 만 지원)
+      for (const ratio of ['1:1', '4:5'] as const) {
         try {
-          const paddedImageBuffer = await addWhitePaddingToRatio(imageUrl, ratio);
+          const croppedImageBuffer = await centerCropToRatio(imageUrl, ratio);
           const filename = `character_${characterId}_${i}_${ratio}_${Date.now()}.png`;
           
           // Vercel Blob에 저장
-          const blob = await put(filename, paddedImageBuffer, {
+          const blob = await put(filename, croppedImageBuffer, {
             access: 'public',
             contentType: 'image/png'
           });
@@ -67,6 +64,12 @@ export async function processCharacterImages(
           
         } catch (ratioError) {
           console.error(`❌ Failed to process ${ratio} ratio for image ${i}:`, ratioError);
+          console.error(`❌ Error stack:`, ratioError?.stack);
+          console.error(`❌ Error details:`, {
+            name: ratioError?.name,
+            message: ratioError?.message,
+            cause: ratioError?.cause
+          });
           // 개별 비율 실패해도 계속 진행
         }
       }
@@ -92,9 +95,9 @@ export async function processCharacterImages(
 }
 
 /**
- * 이미지에 하얀 배경 패딩을 추가하여 특정 비율로 변환
+ * 이미지를 가운데 기준으로 크롭하여 특정 비율로 변환
  */
-async function addWhitePaddingToRatio(
+async function centerCropToRatio(
   imageUrl: string,
   targetRatio: keyof typeof RATIO_DIMENSIONS
 ): Promise<Buffer> {
@@ -119,40 +122,36 @@ async function addWhitePaddingToRatio(
     const targetRatio_num = targetDimensions.width / targetDimensions.height;
     const originalRatio = originalWidth / originalHeight;
     
-    console.log(`📏 Processing for ${targetRatio}: Original ${originalWidth}x${originalHeight} (${originalRatio.toFixed(2)}) → Target ${targetDimensions.width}x${targetDimensions.height} (${targetRatio_num.toFixed(2)})`);
+    console.log(`📏 Center cropping for ${targetRatio}: Original ${originalWidth}x${originalHeight} (${originalRatio.toFixed(2)}) → Target ${targetDimensions.width}x${targetDimensions.height} (${targetRatio_num.toFixed(2)})`);
     
-    // 4. 패딩 계산 (contain 방식)
-    let newWidth, newHeight;
-    let padTop = 0, padBottom = 0, padLeft = 0, padRight = 0;
+    // 4. Center crop 계산 (cover 방식 - 이미지를 목표 비율에 맞게 크롭)
+    let cropWidth, cropHeight;
+    let cropLeft = 0, cropTop = 0;
     
     if (originalRatio > targetRatio_num) {
-      // 원본이 더 넓음 - 너비에 맞추고 상하 패딩
-      newWidth = targetDimensions.width;
-      newHeight = Math.round(targetDimensions.width / originalRatio);
-      padTop = Math.floor((targetDimensions.height - newHeight) / 2);
-      padBottom = targetDimensions.height - newHeight - padTop;
+      // 원본이 더 넓음 - 높이에 맞추고 좌우 크롭
+      cropHeight = originalHeight;
+      cropWidth = Math.round(originalHeight * targetRatio_num);
+      cropLeft = Math.floor((originalWidth - cropWidth) / 2);
     } else {
-      // 원본이 더 높거나 같음 - 높이에 맞추고 좌우 패딩  
-      newHeight = targetDimensions.height;
-      newWidth = Math.round(targetDimensions.height * originalRatio);
-      padLeft = Math.floor((targetDimensions.width - newWidth) / 2);
-      padRight = targetDimensions.width - newWidth - padLeft;
+      // 원본이 더 높거나 같음 - 너비에 맞추고 상하 크롭
+      cropWidth = originalWidth;
+      cropHeight = Math.round(originalWidth / targetRatio_num);
+      cropTop = Math.floor((originalHeight - cropHeight) / 2);
     }
     
-    console.log(`🔧 Padding calculation: resize to ${newWidth}x${newHeight}, pad: top=${padTop}, bottom=${padBottom}, left=${padLeft}, right=${padRight}`);
+    console.log(`🔧 Center crop calculation: crop area ${cropWidth}x${cropHeight} at offset (${cropLeft}, ${cropTop})`);
     
-    // 5. Sharp를 사용하여 리사이즈 및 패딩 추가
+    // 5. Sharp를 사용하여 center crop 및 리사이즈
     const processedImage = await Sharp(imageBuffer)
-      .resize(newWidth, newHeight, {
-        fit: 'fill', // 정확한 크기로 리사이즈
-        background: { r: 255, g: 255, b: 255, alpha: 1 } // 하얀 배경
+      .extract({
+        left: cropLeft,
+        top: cropTop,
+        width: cropWidth,
+        height: cropHeight
       })
-      .extend({
-        top: padTop,
-        bottom: padBottom,
-        left: padLeft,
-        right: padRight,
-        background: { r: 255, g: 255, b: 255, alpha: 1 } // 하얀 패딩
+      .resize(targetDimensions.width, targetDimensions.height, {
+        fit: 'fill' // 정확한 크기로 리사이즈
       })
       .png() // PNG 포맷으로 출력
       .toBuffer();
@@ -173,7 +172,7 @@ export async function processImageToRatio(
   imageUrl: string,
   targetRatio: keyof typeof RATIO_DIMENSIONS
 ): Promise<Buffer> {
-  return addWhitePaddingToRatio(imageUrl, targetRatio);
+  return centerCropToRatio(imageUrl, targetRatio);
 }
 
 /**

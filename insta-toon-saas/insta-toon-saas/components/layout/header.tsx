@@ -153,7 +153,7 @@ export function Header() {
             </Link>
             
             <Link 
-              href="/dashboard" 
+              href="/pricing" 
               className="text-sm font-medium hover:text-primary transition-colors"
             >
               대시보드
@@ -199,7 +199,7 @@ export function Header() {
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem asChild>
-                  <Link href="/dashboard" className="cursor-pointer">
+                  <Link href="/pricing" className="cursor-pointer">
                     <LayoutDashboard className="mr-2 h-4 w-4" />
                     <span>대시보드</span>
                   </Link>

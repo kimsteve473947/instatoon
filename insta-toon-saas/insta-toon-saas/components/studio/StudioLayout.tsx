@@ -12,7 +12,7 @@ import { useStudioStore } from "@/lib/stores/studio-store";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CANVAS_SIZES, type CanvasRatio } from "@/types/editor";
-import { AspectRatio, Square } from "lucide-react";
+import { Maximize2, Square } from "lucide-react";
 
 export function StudioLayout() {
   const { activePanel, panels, tokenBalance } = useStudioStore();
@@ -52,7 +52,7 @@ export function StudioLayout() {
                       <SelectContent>
                         <SelectItem value="4:5">
                           <div className="flex items-center gap-2">
-                            <AspectRatio className="h-4 w-4" />
+                            <Maximize2 className="h-4 w-4" />
                             <span>세로형 (4:5)</span>
                           </div>
                         </SelectItem>

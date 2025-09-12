@@ -40,56 +40,10 @@ export function StorageUsage() {
   const fetchStorageData = async () => {
     try {
       const response = await fetch('/api/storage/check')
-      if (response.ok) {
-        const data = await response.json()
-        // 데이터 구조 검증
-        if (data && data.formatted && typeof data.formatted === 'object') {
-          setStorage(data)
-        } else {
-          // 기본값 설정
-          setStorage({
-            usedBytes: 0,
-            maxBytes: 1024 * 1024 * 1024, // 1GB
-            remainingBytes: 1024 * 1024 * 1024,
-            usagePercentage: 0,
-            fileCount: 0,
-            formatted: {
-              used: '0 Bytes',
-              max: '1 GB',
-              remaining: '1 GB'
-            }
-          })
-        }
-      } else {
-        // API 오류 시 기본값 설정
-        setStorage({
-          usedBytes: 0,
-          maxBytes: 1024 * 1024 * 1024,
-          remainingBytes: 1024 * 1024 * 1024,
-          usagePercentage: 0,
-          fileCount: 0,
-          formatted: {
-            used: '0 Bytes',
-            max: '1 GB',
-            remaining: '1 GB'
-          }
-        })
-      }
+      const data = await response.json()
+      setStorage(data)
     } catch (error) {
       console.error('Failed to fetch storage data:', error)
-      // 오류 시 기본값 설정
-      setStorage({
-        usedBytes: 0,
-        maxBytes: 1024 * 1024 * 1024,
-        remainingBytes: 1024 * 1024 * 1024,
-        usagePercentage: 0,
-        fileCount: 0,
-        formatted: {
-          used: '0 Bytes',
-          max: '1 GB',
-          remaining: '1 GB'
-        }
-      })
     } finally {
       setLoading(false)
     }
@@ -112,9 +66,9 @@ export function StorageUsage() {
 
   if (!storage) return null
 
-  const isNearLimit = (storage?.usagePercentage || 0) > 80
-  const isAtLimit = (storage?.usagePercentage || 0) >= 95
-  const isFreeUser = (storage?.maxBytes || 0) === 1024 * 1024 * 1024 // 1GB
+  const isNearLimit = storage.usagePercentage > 80
+  const isAtLimit = storage.usagePercentage >= 95
+  const isFreeUser = storage.maxBytes === 1024 * 1024 * 1024 // 1GB
 
   return (
     <Card className={cn(
@@ -133,7 +87,7 @@ export function StorageUsage() {
               저장 공간
             </CardTitle>
             <CardDescription className="mt-1">
-              {storage?.fileCount || 0}개 파일 저장 중
+              {storage.fileCount}개 파일 저장 중
             </CardDescription>
           </div>
           {isAtLimit && (
@@ -161,11 +115,11 @@ export function StorageUsage() {
         {/* 프로그레스 바 */}
         <div className="space-y-2">
           <div className="flex justify-between text-sm">
-            <span className="font-medium">{storage?.formatted?.used || '0 Bytes'}</span>
-            <span className="text-muted-foreground">/ {storage?.formatted?.max || '1 GB'}</span>
+            <span className="font-medium">{storage.formatted.used}</span>
+            <span className="text-muted-foreground">/ {storage.formatted.max}</span>
           </div>
           <Progress 
-            value={storage?.usagePercentage || 0} 
+            value={storage.usagePercentage} 
             className={cn(
               "h-3 transition-all",
               isAtLimit && "[&>div]:bg-red-500",
@@ -174,8 +128,8 @@ export function StorageUsage() {
             )}
           />
           <div className="flex justify-between text-xs text-muted-foreground">
-            <span>{(storage?.usagePercentage || 0).toFixed(1)}% 사용중</span>
-            <span>{storage?.formatted?.remaining || '1 GB'} 남음</span>
+            <span>{storage.usagePercentage.toFixed(1)}% 사용중</span>
+            <span>{storage.formatted.remaining} 남음</span>
           </div>
         </div>
 

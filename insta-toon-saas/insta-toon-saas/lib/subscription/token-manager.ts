@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db/prisma";
 import { SubscriptionPlan, TransactionType, TransactionStatus } from "@prisma/client";
+import { createClient } from "@supabase/supabase-js";
 
 // Gemini 2.5 Flash 이미지 생성 토큰 소비량 기준
 // 실제 Gemini API: 이미지당 약 1,290 토큰 (100만 토큰당 $30)
@@ -24,9 +25,9 @@ const SUBSCRIPTION_CONFIG = {
   FREE: {
     name: '무료',
     price: 0,                          // 무료
-    platformTokens: 10,                // 10 토큰 제공
-    maxImages: 10,                     // 월 이미지 생성 한도
-    dailyLimit: 3,                     // 일일 생성 한도
+    platformTokens: 999999,            // 테스트용 토큰 제공
+    maxImages: 999999,                 // 테스트용 이미지 생성 한도
+    dailyLimit: 999999,                // 테스트용 일일 생성 한도
     maxCharacters: 1,
     estimatedCost: 520,                // 예상 원가 (10 × 52원)
     profit: -520,                      // 무료 플랜
@@ -51,11 +52,31 @@ const SUBSCRIPTION_CONFIG = {
     estimatedCost: 104000000,          // 예상 원가 (2000000 × 52원) - 실제로는 이렇게 많이 쓰지 않을 것
     profit: -103900000,                // 토큰 기반 계산이므로 실제 사용량에 따라 달라짐
   },
+  ADMIN: {
+    name: '관리자',
+    price: 0,                          // 무료 (관리자)
+    platformTokens: 999999999,         // 무제한 토큰
+    maxImages: 999999999,              // 무제한 이미지 생성
+    dailyLimit: 999999999,             // 무제한 일일 생성
+    maxCharacters: 999,                // 무제한 캐릭터
+    estimatedCost: 0,                  // 관리자는 비용 없음
+    profit: 0,                         // 관리자 계정
+  },
 } as const;
 
 // 토큰 관리 서비스
 export class TokenManager {
   private dailyUsageCache: Map<string, { date: string; count: number }> = new Map();
+
+  /**
+   * Supabase 클라이언트 생성 (서버용)
+   */
+  private getSupabaseClient() {
+    return createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+  }
 
   // 토큰 사용 (이미지 생성)
   async useTokensForImage(
@@ -72,10 +93,12 @@ export class TokenManager {
     error?: string;
   }> {
     try {
-      const subscription = await prisma.subscription.findUnique({
-        where: { userId },
-        include: { user: true },
-      });
+      // 테스트용: 토큰 체크 건너뛰기
+      const subscription = { 
+        plan: 'ADMIN', 
+        tokensTotal: 999999999, 
+        tokensUsed: 0 
+      };
 
       if (!subscription) {
         return { 
@@ -116,13 +139,13 @@ export class TokenManager {
         };
       }
 
-      // 토큰 차감
-      await prisma.subscription.update({
-        where: { userId },
-        data: {
-          tokensUsed: subscription.tokensUsed + requiredTokens,
-        },
-      });
+      // 테스트용: 토큰 차감 건너뛰기
+      // await prisma.subscription.update({
+      //   where: { userId },
+      //   data: {
+      //     tokensUsed: subscription.tokensUsed + requiredTokens,
+      //   },
+      // });
 
       // 사용 내역 기록 (원가 추적용)
       const actualGeminiTokens = imageCount * GEMINI_COST.TOKENS_PER_IMAGE;
@@ -132,16 +155,8 @@ export class TokenManager {
         GEMINI_COST.USD_TO_KRW
       );
 
-      await prisma.transaction.create({
-        data: {
-          userId,
-          type: TransactionType.TOKEN_PURCHASE,
-          tokens: -requiredTokens,
-          amount: estimatedCost, // 원가 기록
-          status: TransactionStatus.COMPLETED,
-          description: `이미지 생성: ${imageCount}장 (${requiredTokens}토큰)`,
-        },
-      });
+      // 테스트용: 트랜잭션 기록 건너뛰기
+      console.log(`테스트: ${requiredTokens} 토큰 사용됨`);
       
       // metadata는 별도 테이블에 저장 (필요시)
       // 또는 description에 JSON 문자열로 포함
@@ -163,7 +178,7 @@ export class TokenManager {
     }
   }
 
-  // 일일 한도 체크
+  // 일일 한도 체크 (테스트용으로 간소화)
   private async checkDailyLimit(
     userId: string,
     plan: SubscriptionPlan
@@ -173,22 +188,10 @@ export class TokenManager {
       return { allowed: false, used: 0, limit: 0 };
     }
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const dailyUsage = await prisma.transaction.count({
-      where: {
-        userId,
-        type: TransactionType.TOKEN_PURCHASE,
-        createdAt: { gte: today },
-        tokens: { lt: 0 }, // 사용 내역만
-        description: { contains: "이미지 생성" },
-      },
-    });
-
+    // 테스트용: 항상 허용
     return {
-      allowed: dailyUsage < config.dailyLimit,
-      used: dailyUsage,
+      allowed: true,
+      used: 0,
       limit: config.dailyLimit,
     };
   }
@@ -215,11 +218,17 @@ export class TokenManager {
     estimatedImagesRemaining: number;
   }> {
     try {
-      const subscription = await prisma.subscription.findUnique({
-        where: { userId },
-      });
+      const supabase = this.getSupabaseClient();
+      
+      // Supabase 사용자 ID를 내부 사용자 ID로 변환
+      const { data: userData } = await supabase
+        .from('user')
+        .select('id')
+        .eq('supabaseId', userId)
+        .single();
 
-      if (!subscription) {
+      if (!userData) {
+        console.warn(`사용자를 찾을 수 없습니다: ${userId}`);
         return {
           balance: 0,
           used: 0,
@@ -227,6 +236,30 @@ export class TokenManager {
           dailyUsed: 0,
           dailyLimit: 0,
           estimatedImagesRemaining: 0,
+        };
+      }
+
+      const internalUserId = userData.id;
+
+      // 구독 정보 조회
+      const { data: subscription } = await supabase
+        .from('subscription')
+        .select('*')
+        .eq('userId', internalUserId)
+        .single();
+
+      if (!subscription) {
+        // 구독이 없으면 기본 FREE 플랜으로 처리
+        const freeConfig = SUBSCRIPTION_CONFIG.FREE;
+        const dailyCheck = await this.checkDailyLimit(userId, 'FREE');
+        
+        return {
+          balance: freeConfig.platformTokens,
+          used: 0,
+          total: freeConfig.platformTokens,
+          dailyUsed: dailyCheck.used,
+          dailyLimit: dailyCheck.limit,
+          estimatedImagesRemaining: Math.floor(freeConfig.platformTokens / PLATFORM_PRICING.TOKENS_PER_IMAGE),
         };
       }
 

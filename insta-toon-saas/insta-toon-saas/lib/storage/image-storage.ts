@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { v4 as uuidv4 } from "crypto";
+import { v4 as uuidv4 } from "uuid";
 
 export class ImageStorageService {
   private buckets = {

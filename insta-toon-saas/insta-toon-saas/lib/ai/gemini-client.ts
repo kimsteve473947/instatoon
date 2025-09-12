@@ -1,9 +1,12 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
-// Gemini 클라이언트 초기화 (공식 문서 방식)
-const genAI = new GoogleGenAI({ 
-  apiKey: process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || ""
-});
+// Gemini 클라이언트 초기화 (올바른 패키지 사용)
+const genAI = new GoogleGenerativeAI(
+  process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || ""
+);
+
+// 텍스트 생성을 위한 모델 (Gemini 2.0 Flash)
+const textModel = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
 
 // 캐릭터 일관성을 위한 프롬프트 빌더
 export class PromptBuilder {
@@ -219,6 +222,38 @@ export class CharacterConsistencyManager {
     return commonFeatures.length >= existing.features.length * 0.5;
   }
 }
+
+// 대본 생성을 위한 텍스트 생성 함수 (토큰 사용량 포함)
+export const geminiClient = {
+  generateContent: async (prompt: string) => {
+    try {
+      const result = await textModel.generateContent(prompt);
+      const response = await result.response;
+      
+      // 실제 토큰 사용량 추출
+      const usageMetadata = response.usageMetadata;
+      
+      console.log('🔍 Gemini API Usage:', {
+        promptTokenCount: usageMetadata?.promptTokenCount || 0,
+        candidatesTokenCount: usageMetadata?.candidatesTokenCount || 0,
+        totalTokenCount: usageMetadata?.totalTokenCount || 0
+      });
+      
+      return {
+        text: response.text(),
+        success: true,
+        usage: {
+          promptTokens: usageMetadata?.promptTokenCount || 0,
+          completionTokens: usageMetadata?.candidatesTokenCount || 0,
+          totalTokens: usageMetadata?.totalTokenCount || 0
+        }
+      };
+    } catch (error) {
+      console.error('Gemini API error:', error);
+      throw error;
+    }
+  }
+};
 
 // 싱글톤 인스턴스
 export const imageGenerationService = new ImageGenerationService();

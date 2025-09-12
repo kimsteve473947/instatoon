@@ -26,6 +26,7 @@ import {
   Trash2,
   MessageSquare,
   Type,
+  User,
   UserPlus,
   FileText,
   Image as ImageIcon,
@@ -40,7 +41,9 @@ import {
   MoreHorizontal,
   RotateCcw,
   Edit3,
-  Save
+  Save,
+  Check,
+  Zap
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BUBBLE_TEMPLATES, BUBBLE_CATEGORIES } from './BubbleTemplates';
@@ -49,18 +52,16 @@ import { OptimizedImage } from './OptimizedImage';
 import { VirtualizedTemplateList } from './VirtualizedTemplateList';
 import { CharacterSelector } from './CharacterSelector';
 import { AddCharacterModal } from './AddCharacterModal';
-import { RatioChangeConfirmDialog } from './RatioChangeConfirmDialog';
-import { InitialRatioSelectionDialog } from './InitialRatioSelectionDialog';
+import { AIScriptGenerator } from './AIScriptGenerator';
 import { useDebounce } from '@/hooks/useDebounce';
 import { useHistory } from '@/hooks/useHistory';
-import { useRouter } from 'next/navigation';
-import { resizeImageToCanvas } from '@/lib/utils/client-image-resizer';
+import { createBrowserClient } from '@supabase/ssr';
 
-// 캔버스 크기 정의 (확대된 표시 크기)
+// 캔버스 크기 정의 (최적화된 치수)
 const CANVAS_SIZES = {
-  '4:5': { width: 480, height: 600, actualWidth: 1024, actualHeight: 1280, label: '세로형' },
-  '1:1': { width: 480, height: 480, actualWidth: 1024, actualHeight: 1024, label: '정사각형' },
-  '16:9': { width: 480, height: 270, actualWidth: 1920, actualHeight: 1080, label: '가로형' }
+  '4:5': { width: 320, height: 398, actualWidth: 896, actualHeight: 1115, label: '세로형' },
+  '1:1': { width: 320, height: 320, actualWidth: 1024, actualHeight: 1024, label: '정사각형' },
+  '16:9': { width: 320, height: 180, actualWidth: 1920, actualHeight: 1080, label: '가로형' }
 };
 
 type CanvasRatio = '4:5' | '1:1' | '16:9';
@@ -116,8 +117,14 @@ interface MiriCanvasStudioUltimateProps {
 }
 
 export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: MiriCanvasStudioUltimateProps) {
-  const router = useRouter();
   const [zoom, setZoom] = useState<number>(100);
+  const [panelsLoaded, setPanelsLoaded] = useState(false);
+  
+  // Supabase 클라이언트
+  const supabase = createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
   
   // 초기 상태 준비
   const getInitialState = (): StudioHistoryState => {
@@ -130,27 +137,15 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
       console.log('localStorage cleanup');
     }
     
-    // 초기 데이터가 있으면 로드, 없으면 기본값
-    const initialCuts = initialData?.workspacesettings?.panels
-      ? initialData.workspacesettings.panels.map((panel: any) => ({
-          id: panel.id || Date.now().toString() + Math.random(),
-          prompt: panel.prompt || '',
-          imageUrl: panel.imageUrl,
-          generationId: panel.generationId,
-          elements: panel.editData?.elements || panel.elements || []
-        }))
-      : [
-          { id: '1', prompt: '', elements: [] },
-          { id: '2', prompt: '', elements: [] }
-        ];
-    
-    const initialRatio = initialData?.workspacesettings?.panels?.[0]?.editData?.canvasRatio || '4:5';
-    
+    // 기본값만 반환 (패널 데이터는 useEffect에서 로드)
     return {
-      cuts: initialCuts,
+      cuts: [
+        { id: '1', prompt: '', elements: [] },
+        { id: '2', prompt: '', elements: [] }
+      ],
       selectedCutId: '1',
       selectedElementId: null,
-      canvasRatio: initialRatio as CanvasRatio
+      canvasRatio: '4:5' as CanvasRatio
     };
   };
   
@@ -172,8 +167,14 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
   const [tempCuts, setTempCuts] = useState<WebtoonCut[] | null>(null);
   const [dragStartState, setDragStartState] = useState<WebtoonCut[] | null>(null);
   
-  // 실제 사용할 cuts (드래그 중이면 tempCuts, 아니면 historyCuts)
-  const cuts = tempCuts || historyCuts;
+  // 드래그 및 리사이즈 상태 - cuts 변수보다 먼저 선언
+  const [isDraggingElement, setIsDraggingElement] = useState(false);
+  const [draggedElement, setDraggedElement] = useState<{ id: string; offsetX: number; offsetY: number } | null>(null);
+  const [isResizing, setIsResizing] = useState(false);
+  const [resizeHandle, setResizeHandle] = useState<string | null>(null);
+  
+  // 실제 사용할 cuts (드래그/리사이즈 중이면 tempCuts, 아니면 historyCuts)
+  const cuts = (isDraggingElement || isResizing) && tempCuts ? tempCuts : historyCuts;
   
   
   // 히스토리 업데이트 헬퍼 함수
@@ -205,143 +206,32 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
     updateStateWithoutHistory(prev => ({ ...prev, selectedElementId: id }));
   };
   
-  // 🔒 첫 번째 이미지 생성 후 비율 고정 체크
-  const isRatioLocked = useMemo(() => {
-    return cuts.some(cut => cut.imageUrl && cut.imageUrl.trim() !== '');
-  }, [cuts]);
-
-  // 비율 변경 시도 (비율이 고정되어 있으면 확인 다이얼로그 표시)
-  const handleRatioChangeAttempt = (targetRatio: CanvasRatio) => {
-    if (canvasRatio === targetRatio) return; // 같은 비율이면 무시
-    
-    // 🚫 비율이 고정되어 있으면 새 스튜디오 확인 다이얼로그 표시
-    if (isRatioLocked) {
-      setRatioChangeDialog({
-        open: true,
-        targetRatio: targetRatio
-      });
-      return;
-    }
-    
-    // 비율이 고정되지 않았으면 바로 변경
-    updateHistory({ canvasRatio: targetRatio });
-  };
-
-  // 새 스튜디오 생성 확인
-  const handleNewStudioConfirm = async (targetRatio: CanvasRatio) => {
-    try {
-      // 1. 현재 작업 저장
-      if (onSave) {
-        const panelsData = cuts.map(cut => ({
-          prompt: cut.prompt,
-          imageUrl: cut.imageUrl,
-          generationId: cut.generationId,
-          editData: {
-            elements: cut.elements,
-            canvasRatio: canvasRatio,
-            selectedCharacters: selectedCharacters
-          }
-        }));
-        await onSave(panelsData, initialData?.title);
-      }
-      
-      // 2. 새로운 프로젝트 생성하고 해당 비율의 스튜디오로 이동
-      const response = await fetch('/api/studio/create-project', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          title: `새 프로젝트 (${CANVAS_SIZES[targetRatio].label})`,
-          canvasRatio: targetRatio,
-          selectedCharacters: selectedCharacters // 현재 선택된 캐릭터 유지
-        })
-      });
-      
-      if (!response.ok) {
-        throw new Error('새 프로젝트 생성 실패');
-      }
-      
-      const newProject = await response.json();
-      
-      // 3. 새 프로젝트의 스튜디오로 리다이렉트
-      router.push(`/studio?projectId=${newProject.id}`);
-      
-    } catch (error) {
-      console.error('새 스튜디오 생성 실패:', error);
-      // 에러 토스트 등의 처리를 여기에 추가할 수 있습니다
-    }
-  };
-
-  // 비율 변경 취소
-  const handleRatioChangeCancel = () => {
-    setRatioChangeDialog({
-      open: false,
-      targetRatio: null
-    });
-  };
-
-  // 초기 비율 선택 확인 핸들러
-  const handleInitialRatioConfirm = async (selectedRatio: CanvasRatio) => {
-    console.log('🎯 비율 선택 완료:', selectedRatio);
-    
-    // 1. 캔버스 비율 업데이트
-    updateHistory({ canvasRatio: selectedRatio });
-    
-    // 2. 대기 중인 이미지 생성 실행
-    if (initialRatioDialog.pendingCutId) {
-      await executeImageGeneration(initialRatioDialog.pendingCutId);
-    }
-    
-    // 3. 다이얼로그 닫기
-    setInitialRatioDialog({
-      open: false,
-      pendingCutId: null
-    });
-  };
-
-  // 초기 비율 선택 취소 핸들러
-  const handleInitialRatioCancel = () => {
-    console.log('🚫 비율 선택 취소');
-    setInitialRatioDialog({
-      open: false,
-      pendingCutId: null
-    });
-  };
-
-  // 레거시 함수 (하위 호환용)
+  // 캔버스 비율 변경 (이것은 히스토리에 기록)
   const setCanvasRatio = (ratio: CanvasRatio) => {
-    handleRatioChangeAttempt(ratio);
+    updateHistory({ canvasRatio: ratio });
   };
   
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-  const [activeTab, setActiveTab] = useState<'bubble' | 'text' | 'ai-character' | 'ai-script'>('bubble');
+  const [activeTab, setActiveTab] = useState<'bubble' | 'text' | 'ai-character' | 'ai-script'>('ai-script');
+  const [showAIScriptModal, setShowAIScriptModal] = useState(false);
   const [bubbleText, setBubbleText] = useState('');
   const [textContent, setTextContent] = useState('');
   
-  // 비율 변경 확인 다이얼로그 상태
-  const [ratioChangeDialog, setRatioChangeDialog] = useState<{
-    open: boolean;
-    targetRatio: CanvasRatio | null;
-  }>({
-    open: false,
-    targetRatio: null
-  });
-
-  // 초기 비율 선택 다이얼로그 상태
-  const [initialRatioDialog, setInitialRatioDialog] = useState<{
-    open: boolean;
-    pendingCutId: string | null;
-  }>({
-    open: false,
-    pendingCutId: null
-  });
+  // AI 대본 생성 상태
+  const [storyPrompt, setStoryPrompt] = useState('');
+  const [selectedPanelCount, setSelectedPanelCount] = useState<'4-5' | '6-8' | '9-10'>('4-5');
+  const [scriptCharacters, setScriptCharacters] = useState<any[]>([]);
+  const [selectedScriptCharacters, setSelectedScriptCharacters] = useState<string[]>([]);
+  const [isGeneratingScript, setIsGeneratingScript] = useState(false);
+  const [generatedScript, setGeneratedScript] = useState<any[]>([]);
+  const [scriptCopiedIndex, setScriptCopiedIndex] = useState<number | null>(null);
   
-  // 드래그 및 리사이즈 상태 - 자동 저장 방지를 위해 여기로 이동
-  const [isDraggingElement, setIsDraggingElement] = useState(false);
-  const [draggedElement, setDraggedElement] = useState<{ id: string; offsetX: number; offsetY: number } | null>(null);
-  const [isResizing, setIsResizing] = useState(false);
-  const [resizeHandle, setResizeHandle] = useState<string | null>(null);
+  // AI 캐릭터 생성 관련 상태
+  const [characterDescription, setCharacterDescription] = useState('');
+  const [generatedCharacterUrl, setGeneratedCharacterUrl] = useState<string | null>(null);
+  const [isGeneratingCharacter, setIsGeneratingCharacter] = useState(false);
+  const [isAddingCharacterToDB, setIsAddingCharacterToDB] = useState(false);
+  
   
   // 드래그 상태 초기화 헬퍼
   const resetDragState = useCallback(() => {
@@ -425,6 +315,36 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
   const [addCharacterModalOpen, setAddCharacterModalOpen] = useState(false);
   const [characterRefreshKey, setCharacterRefreshKey] = useState(0);
   
+  // AI 대본용 캐릭터 로딩
+  useEffect(() => {
+    loadScriptCharacters();
+  }, [characterRefreshKey]);
+
+  const loadScriptCharacters = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data: userData } = await supabase
+        .from('user')
+        .select('id')
+        .eq('supabaseId', user.id)
+        .single();
+
+      if (!userData) return;
+
+      const { data: charactersData } = await supabase
+        .from('character')
+        .select('id, name, description, thumbnailUrl')
+        .eq('userId', userData.id)
+        .order('createdAt', { ascending: false });
+
+      setScriptCharacters(charactersData || []);
+    } catch (error) {
+      console.error('대본용 캐릭터 로딩 실패:', error);
+    }
+  };
+  
   // 디바운스된 색상 업데이트를 위한 상태
   const [pendingColorUpdates, setPendingColorUpdates] = useState<{
     [key: string]: {
@@ -440,7 +360,7 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
   useEffect(() => {
     Object.entries(debouncedColorUpdates).forEach(([elementId, updates]) => {
       if (Object.keys(updates).length > 0) {
-        setCuts(prevCuts => prevCuts.map(cut => ({
+        setCuts(cuts => cuts.map(cut => ({
           ...cut,
           elements: cut.elements.map(el => 
             el.id === elementId 
@@ -453,56 +373,87 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
     setPendingColorUpdates({});
   }, [debouncedColorUpdates]);
 
-  // 초기 데이터 복원
+  // 패널 데이터 로드
   useEffect(() => {
-    if (initialData?.workspacesettings?.panels?.length > 0) {
-      const firstPanel = initialData.workspacesettings.panels[0];
-      if (firstPanel?.editData) {
-        if (firstPanel.editData.canvasRatio) {
-          setCanvasRatio(firstPanel.editData.canvasRatio);
+    const loadPanelsFromDatabase = async () => {
+      if (!projectId || panelsLoaded) return;
+      
+      try {
+        console.log('🔄 패널 데이터 로드 중...', projectId);
+        
+        const { data: panels, error } = await supabase
+          .from('panel')
+          .select('*')
+          .eq('projectId', projectId)
+          .order('order', { ascending: true });
+
+        if (error) {
+          console.error('❌ 패널 로드 실패:', error);
+          return;
         }
-        if (firstPanel.editData.selectedCharacters) {
-          setSelectedCharacters(firstPanel.editData.selectedCharacters);
+
+        if (panels && panels.length > 0) {
+          console.log('✅ 패널 데이터 로드됨:', panels.length, '개');
+          
+          const loadedCuts = panels.map((panel: any) => ({
+            id: panel.order.toString(),
+            prompt: panel.prompt || '',
+            imageUrl: panel.imageUrl,
+            generationId: panel.generationId,
+            elements: panel.editData?.elements || []
+          }));
+
+          // 첫 번째 패널의 설정 복원
+          const firstPanel = panels[0];
+          if (firstPanel?.editData) {
+            if (firstPanel.editData.canvasRatio) {
+              updateStateWithoutHistory(prev => ({ 
+                ...prev, 
+                cuts: loadedCuts,
+                canvasRatio: firstPanel.editData.canvasRatio 
+              }));
+            } else {
+              updateStateWithoutHistory(prev => ({ ...prev, cuts: loadedCuts }));
+            }
+            
+            if (firstPanel.editData.selectedCharacters) {
+              setSelectedCharacters(firstPanel.editData.selectedCharacters);
+            }
+          } else {
+            updateStateWithoutHistory(prev => ({ ...prev, cuts: loadedCuts }));
+          }
+        } else {
+          console.log('ℹ️ 저장된 패널이 없어 기본 패널 사용');
         }
+        
+        setPanelsLoaded(true);
+      } catch (error) {
+        console.error('❌ 패널 로드 오류:', error);
+        setPanelsLoaded(true); // 오류가 발생해도 로딩 상태를 완료로 설정
       }
-    }
-  }, [initialData]);
+    };
+
+    loadPanelsFromDatabase();
+  }, [projectId, supabase, panelsLoaded, updateStateWithoutHistory]);
 
   // cuts 변경 감지 (변경사항 추적) - 제거
   // 이미 updateHistory 함수에서 setHasUnsavedChanges(true)를 호출하므로 중복 제거
 
   // 자동 저장 (디바운스 적용) - 드래그/리사이즈 중이 아닐 때만 저장
-  const debouncedCuts = useDebounce(cuts, 10000); // 10초 디바운스로 증가하여 저장 빈도 감소
-  
-  // 캔버스 전환 상태 추적
-  const [isCanvasSwitching, setIsCanvasSwitching] = useState(false);
-  
-  // 프롬프트 입력 상태 추적
-  const [isTypingPrompt, setIsTypingPrompt] = useState(false);
-  const promptTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const debouncedCuts = useDebounce(cuts, 15000); // 15초 디바운스 (DB 부하 감소)
   
   useEffect(() => {
-    // 드래그, 리사이즈, 캔버스 전환, 프롬프트 입력 중이면 자동 저장 건너뛰기
-    if (isDraggingElement || isResizing || isCanvasSwitching || isTypingPrompt) {
-      console.log('자동 저장 스킵 - 상태:', {
-        isDraggingElement,
-        isResizing,
-        isCanvasSwitching,
-        isTypingPrompt
-      });
-      return;
-    }
+    // 패널이 로드되지 않았거나 드래그/리사이즈 중이면 자동 저장 건너뛰기
+    if (!panelsLoaded || isDraggingElement || isResizing) return;
     
     if (debouncedCuts && hasUnsavedChanges && onSave) {
-      console.log('🔄 자동 저장 중...', { cutsLength: cuts.length });
       autoSaveProject().then(() => {
-        console.log('✅ 자동 저장 완료');
         setHasUnsavedChanges(false);
       }).catch((error) => {
         console.error('❌ 자동 저장 실패:', error);
       });
     }
-  }, [debouncedCuts, hasUnsavedChanges, onSave, isDraggingElement, isResizing, isCanvasSwitching, isTypingPrompt]);
+  }, [debouncedCuts, hasUnsavedChanges, onSave, isDraggingElement, isResizing, panelsLoaded]);
 
   // 페이지 이탈 시 자동 저장 처리
   useEffect(() => {
@@ -550,15 +501,6 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
       window.removeEventListener('unload', handleUnload);
     };
   }, [hasUnsavedChanges, cuts, canvasRatio, selectedCharacters, projectId, initialData]);
-
-  // 컴포넌트 언마운트 시 프롬프트 타임아웃 정리
-  useEffect(() => {
-    return () => {
-      if (promptTimeoutRef.current) {
-        clearTimeout(promptTimeoutRef.current);
-      }
-    };
-  }, []);
   
   const canvasAreaRef = useRef<HTMLDivElement>(null);
   const canvasRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
@@ -643,7 +585,7 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
       prompt: '',
       elements: []
     };
-    setCuts(prevCuts => [...prevCuts, newCut]);
+    setCuts([...cuts, newCut]);
     setSelectedCutId(newCut.id);
     
     // 새 컷 추가 후 약간의 딸레이를 두고 스크롤 (렌더링 완료 대기)
@@ -655,10 +597,8 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
   const deleteCut = (cutId: string) => {
     if (cuts.length <= 1) return; // 최소 1개 컷은 유지
     
-    setCuts(prevCuts => {
-      const updatedCuts = prevCuts.filter(cut => cut.id !== cutId);
-      return updatedCuts;
-    });
+    const updatedCuts = cuts.filter(cut => cut.id !== cutId);
+    setCuts(updatedCuts);
     
     // 삭제된 컷이 선택되어 있었다면 다른 컷 선택
     if (selectedCutId === cutId) {
@@ -707,11 +647,9 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
     const currentIndex = cuts.findIndex(cut => cut.id === cutId);
     if (currentIndex <= 0) return; // 이미 맨 위에 있음
     
-    setCuts(prevCuts => {
-      const newCuts = [...prevCuts];
-      [newCuts[currentIndex], newCuts[currentIndex - 1]] = [newCuts[currentIndex - 1], newCuts[currentIndex]];
-      return newCuts;
-    });
+    const newCuts = [...cuts];
+    [newCuts[currentIndex], newCuts[currentIndex - 1]] = [newCuts[currentIndex - 1], newCuts[currentIndex]];
+    setCuts(newCuts);
     
     // 순서 변경 후 스크롤 위치 조정
     setTimeout(() => scrollToCanvas(cutId), 100);
@@ -721,47 +659,27 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
     const currentIndex = cuts.findIndex(cut => cut.id === cutId);
     if (currentIndex >= cuts.length - 1) return; // 이미 맨 아래에 있음
     
-    setCuts(prevCuts => {
-      const newCuts = [...prevCuts];
-      [newCuts[currentIndex], newCuts[currentIndex + 1]] = [newCuts[currentIndex + 1], newCuts[currentIndex]];
-      return newCuts;
-    });
+    const newCuts = [...cuts];
+    [newCuts[currentIndex], newCuts[currentIndex + 1]] = [newCuts[currentIndex + 1], newCuts[currentIndex]];
+    setCuts(newCuts);
     
     // 순서 변경 후 스크롤 위치 조정
     setTimeout(() => scrollToCanvas(cutId), 100);
   };
 
-  // 프롬프트 임시 저장을 위한 상태 (히스토리에 저장하지 않음)
-  const [tempPrompts, setTempPrompts] = useState<{ [cutId: string]: string }>({});
-  
-  // useCallback으로 함수 메모이제이션
+  // useCallback으로 함수 메모이제이션 - historyCuts 기준으로 업데이트
   const updateCutPrompt = useCallback((cutId: string, prompt: string) => {
-    console.log('🖊️ 프롬프트 입력 시작, 임시 저장');
     
-    // 임시 프롬프트 저장 (히스토리에 기록하지 않음)
-    setTempPrompts(prev => ({ ...prev, [cutId]: prompt }));
+    // tempCuts 상태 초기화 (프롬프트 변경 시 드래그 상태 아님)
+    setTempCuts(null);
     
-    setIsTypingPrompt(true);
-    
-    // 기존 타임아웃 클리어
-    if (promptTimeoutRef.current) {
-      clearTimeout(promptTimeoutRef.current);
-    }
-    
-    // 5초 후 히스토리에 실제 저장 (자동 저장 디바운스 시간보다 짧게)
-    promptTimeoutRef.current = setTimeout(() => {
-      console.log('✅ 프롬프트 히스토리에 저장');
-      setCuts(prevCuts => prevCuts.map(cut => 
+    // historyCuts 기준으로 업데이트하여 이미지 보존
+    updateHistory({
+      cuts: historyCuts.map(cut => 
         cut.id === cutId ? { ...cut, prompt } : cut
-      ));
-      setTempPrompts(prev => {
-        const newTemp = { ...prev };
-        delete newTemp[cutId];
-        return newTemp;
-      });
-      setIsTypingPrompt(false);
-    }, 5000);
-  }, []);
+      )
+    }, true); // tempCuts 클리어
+  }, [historyCuts, updateHistory]);
 
   // 요소가 속한 캔버스를 찾고 자동 이동하는 함수
   const findElementCutAndSelect = useCallback((elementId: string) => {
@@ -786,11 +704,20 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
 
   // 캐릭터 관련 함수
   const handleCharacterToggle = (characterId: string) => {
-    setSelectedCharacters(prev => 
-      prev.includes(characterId)
+    setSelectedCharacters(prev => {
+      const newSelection = prev.includes(characterId)
         ? prev.filter(id => id !== characterId)
-        : [...prev, characterId]
-    );
+        : [...prev, characterId];
+      
+      console.log('🎭 Character toggle:', {
+        characterId,
+        previousSelection: prev,
+        newSelection,
+        action: prev.includes(characterId) ? 'deselect' : 'select'
+      });
+      
+      return newSelection;
+    });
   };
 
   const handleAddCharacter = () => {
@@ -802,59 +729,152 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
     setCharacterRefreshKey(prev => prev + 1);
   };
 
-  // AI 이미지 생성 함수
-  const generateImage = async (cutId: string) => {
-    // 🔒 첫 번째 이미지 생성인지 체크 (비율이 아직 고정되지 않았다면)
-    if (!isRatioLocked) {
-      console.log('🎯 첫 번째 이미지 생성 - 비율 선택 다이얼로그 표시');
-      setInitialRatioDialog({
-        open: true,
-        pendingCutId: cutId
-      });
+  // AI 대본 생성 함수들
+  const handleScriptCharacterToggle = (characterId: string) => {
+    setSelectedScriptCharacters(prev => 
+      prev.includes(characterId)
+        ? prev.filter(id => id !== characterId)
+        : [...prev, characterId]
+    );
+  };
+
+  const generateScript = async () => {
+    if (!storyPrompt.trim()) {
+      alert('스토리 아이디어를 입력해주세요');
       return;
     }
 
-    // 실제 이미지 생성 로직 실행
-    await executeImageGeneration(cutId);
+    setIsGeneratingScript(true);
+    
+    try {
+      const characterNames = selectedScriptCharacters.map(id => {
+        const char = scriptCharacters.find(c => c.id === id);
+        return char?.name || '';
+      }).filter(Boolean);
+
+      const panelCount = selectedPanelCount === '4-5' ? 4 : 
+                        selectedPanelCount === '6-8' ? 7 : 10;
+
+      const response = await fetch('/api/ai/generate-script', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          storyPrompt: storyPrompt.trim(),
+          characterNames,
+          panelCount,
+          style: 'webtoon'
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.text();
+        console.error('❌ Script generation API error:', errorData);
+        
+        try {
+          const jsonError = JSON.parse(errorData);
+          throw new Error(jsonError.error || '대본 생성 실패');
+        } catch (parseError) {
+          throw new Error(`API 오류 (${response.status}): ${errorData.substring(0, 100)}...`);
+        }
+      }
+
+      const resultText = await response.text();
+      console.log('✅ Script generation response:', resultText);
+      
+      let result;
+      try {
+        result = JSON.parse(resultText);
+      } catch (parseError) {
+        console.error('❌ JSON parse error:', parseError);
+        console.error('❌ Response text:', resultText);
+        throw new Error('서버 응답 형식이 올바르지 않습니다. HTML 페이지가 반환되었을 수 있습니다.');
+      }
+
+      if (result.success === false) {
+        throw new Error(result.error || '대본 생성 실패');
+      }
+
+      if (!result.panels || !Array.isArray(result.panels)) {
+        console.error('❌ Invalid response structure:', result);
+        throw new Error('대본 데이터가 올바르지 않습니다');
+      }
+
+      setGeneratedScript(result.panels);
+      
+    } catch (error) {
+      console.error('대본 생성 실패:', error);
+      alert(error instanceof Error ? error.message : '대본 생성 중 오류가 발생했습니다');
+    } finally {
+      setIsGeneratingScript(false);
+    }
   };
 
-  // 실제 이미지 생성 실행 함수 (비율 선택 후 또는 이미 비율이 고정된 경우)
-  const executeImageGeneration = async (cutId: string) => {
-    // 임시 프롬프트가 있다면 실제 프롬프트로 커밋
-    const actualPrompt = tempPrompts[cutId];
-    if (actualPrompt) {
-      console.log('🔄 이미지 생성 전 프롬프트 커밋');
-      setCuts(prevCuts => prevCuts.map(cut => 
-        cut.id === cutId ? { ...cut, prompt: actualPrompt } : cut
-      ));
-      setTempPrompts(prev => {
-        const newTemp = { ...prev };
-        delete newTemp[cutId];
-        return newTemp;
-      });
-      // 타임아웃도 클리어
-      if (promptTimeoutRef.current) {
-        clearTimeout(promptTimeoutRef.current);
-        setIsTypingPrompt(false);
-      }
-    }
-    
+  const copyScriptPrompt = (prompt: string, index: number) => {
+    navigator.clipboard.writeText(prompt);
+    setScriptCopiedIndex(index);
+    setTimeout(() => setScriptCopiedIndex(null), 2000);
+  };
+
+  const useGeneratedScript = () => {
+    handleScriptGenerated(generatedScript);
+  };
+
+  // AI 대본 적용 함수
+  interface ScriptPanel {
+    order: number;
+    prompt: string;
+    characters: string[];
+  }
+
+  const handleScriptGenerated = (panels: ScriptPanel[]) => {
+    // 기존 컷들을 새 대본으로 교체
+    const newCuts: WebtoonCut[] = panels.map((panel, index) => ({
+      id: String(index + 1),
+      prompt: panel.prompt,
+      elements: [],
+      imageUrl: undefined,
+      generationId: undefined,
+      isGenerating: false
+    }));
+
+    updateHistory({ 
+      cuts: newCuts,
+      selectedCutId: newCuts.length > 0 ? newCuts[0].id : '1'
+    });
+
+    setHasUnsavedChanges(true);
+    setShowAIScriptModal(false);
+  };
+
+  // AI 이미지 생성 함수
+  const generateImage = async (cutId: string) => {
     const cut = cuts.find(c => c.id === cutId);
-    const finalPrompt = actualPrompt || cut?.prompt;
-    if (!cut || !finalPrompt?.trim()) return;
+    if (!cut || !cut.prompt.trim()) return;
+    
+    // 이미 생성 중이면 중복 요청 방지
+    if (cut.isGenerating) {
+      console.log('🚫 Generation already in progress for cut:', cutId);
+      return;
+    }
 
     console.log('🎨 Generating image with projectId:', projectId, 'panelId:', cutId);
+    console.log('🎭 Selected characters:', selectedCharacters, 'Length:', selectedCharacters?.length || 0);
 
-    setCuts(prevCuts => prevCuts.map(c => 
-      c.id === cutId ? { ...c, isGenerating: true } : c
-    ));
+    // historyCuts 기준으로 업데이트하여 상태 안정화
+    updateHistory({
+      cuts: historyCuts.map(c => 
+        c.id === cutId ? { ...c, isGenerating: true } : c
+      )
+    }, true);
 
     try {
       const requestBody = {
-        prompt: finalPrompt,
+        prompt: cut.prompt,
         aspectRatio: canvasRatio,
         style: 'webtoon',
-        characterIds: selectedCharacters, // 선택된 캐릭터 ID들 추가
+        characterIds: selectedCharacters?.length > 0 ? selectedCharacters : [], // 빈 배열이면 명시적으로 빈 배열 전달
         projectId: projectId, // 프로젝트 ID 추가하여 DB에서 연결
         panelId: cutId // 패널 ID도 추가
       };
@@ -877,42 +897,25 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
 
       const result = await response.json();
       
-      // 클라이언트 사이드에서 이미지 리사이징 수행
-      console.log('🖼️ 클라이언트 리사이징 시작:', result.imageUrl?.slice(0, 50) + '...');
-      let finalImageUrl = result.imageUrl;
-      
-      // 안전한 리사이징 시도
-      if (result.imageUrl && typeof window !== 'undefined') {
-        try {
-          console.log('📋 리사이징 파라미터:', { canvasRatio, imageUrlType: typeof result.imageUrl });
-          const resizedUrl = await resizeImageToCanvas(result.imageUrl, canvasRatio);
-          if (resizedUrl && resizedUrl.startsWith('data:')) {
-            finalImageUrl = resizedUrl;
-            console.log('✅ 클라이언트 리사이징 완료');
-          } else {
-            console.warn('⚠️ 리사이징 결과가 유효하지 않음, 원본 사용');
-          }
-        } catch (resizeError) {
-          console.error('❌ 클라이언트 리사이징 실패:', resizeError);
-          console.warn('⚠️ 원본 이미지 사용');
-        }
-      } else {
-        console.warn('⚠️ 리사이징 조건 불충족 - 서버 환경이거나 이미지 URL 없음');
-      }
-      
-      setCuts(prevCuts => prevCuts.map(c => 
-        c.id === cutId 
-          ? { 
-              ...c, 
-              imageUrl: finalImageUrl, 
-              generationId: result.generationId, // generationId 저장
-              isGenerating: false 
-            }
-          : c
-      ));
+      // historyCuts 기준으로 이미지 결과 업데이트
+      updateHistory({
+        cuts: historyCuts.map(c => 
+          c.id === cutId 
+            ? { 
+                ...c, 
+                imageUrl: result.imageUrl, 
+                generationId: result.generationId, // generationId 저장
+                isGenerating: false 
+              }
+            : c
+        )
+      }, true);
       
       // 변경사항 있음 표시
       setHasUnsavedChanges(true);
+      
+      // 드래그 상태 강제 초기화 (이미지 생성 후 캔버스 비활성화 방지)
+      resetDragState();
       
       // 이미지는 Supabase generation 테이블에 자동으로 저장됨
       console.log('Image generated and saved to database with projectId:', projectId, 'generationId:', result.generationId);
@@ -920,9 +923,16 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
       console.error('Image generation failed:', error);
       const errorMessage = error instanceof Error ? error.message : '이미지 생성 실패';
       alert(`이미지 생성 오류: ${errorMessage}`);
-      setCuts(prevCuts => prevCuts.map(c => 
-        c.id === cutId ? { ...c, isGenerating: false } : c
-      ));
+      
+      // historyCuts 기준으로 에러 상태 업데이트
+      updateHistory({
+        cuts: historyCuts.map(c => 
+          c.id === cutId ? { ...c, isGenerating: false } : c
+        )
+      }, true);
+      
+      // 에러 시에도 드래그 상태 초기화
+      resetDragState();
     }
   };
 
@@ -931,9 +941,12 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
     const cut = cuts.find(c => c.id === cutId);
     if (!cut || !cut.imageUrl || !editPrompt.trim()) return;
 
-    setCuts(prevCuts => prevCuts.map(c => 
-      c.id === cutId ? { ...c, isGenerating: true } : c
-    ));
+    // historyCuts 기준으로 업데이트
+    updateHistory({
+      cuts: historyCuts.map(c => 
+        c.id === cutId ? { ...c, isGenerating: true } : c
+      )
+    }, true);
 
     try {
       const response = await fetch('/api/ai/generate', {
@@ -959,40 +972,33 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
 
       const result = await response.json();
       
-      // 클라이언트 사이드에서 이미지 리사이징 수행 (편집 시에도)
-      console.log('🖼️ 이미지 편집 - 클라이언트 리사이징 시작:', result.imageUrl?.slice(0, 50) + '...');
-      let finalImageUrl = result.imageUrl;
-      
-      // 안전한 리사이징 시도 (편집 시)
-      if (result.imageUrl && typeof window !== 'undefined') {
-        try {
-          const resizedUrl = await resizeImageToCanvas(result.imageUrl, canvasRatio);
-          if (resizedUrl && resizedUrl.startsWith('data:')) {
-            finalImageUrl = resizedUrl;
-            console.log('✅ 이미지 편집 - 클라이언트 리사이징 완료');
-          } else {
-            console.warn('⚠️ 편집 리사이징 결과가 유효하지 않음, 원본 사용');
-          }
-        } catch (resizeError) {
-          console.error('❌ 이미지 편집 - 클라이언트 리사이징 실패:', resizeError);
-          console.warn('⚠️ 원본 이미지 사용');
-        }
-      }
-      
-      setCuts(prevCuts => prevCuts.map(c => 
-        c.id === cutId 
-          ? { ...c, imageUrl: finalImageUrl, isGenerating: false }
-          : c
-      ));
+      // historyCuts 기준으로 결과 업데이트
+      updateHistory({
+        cuts: historyCuts.map(c => 
+          c.id === cutId 
+            ? { ...c, imageUrl: result.imageUrl, isGenerating: false }
+            : c
+        )
+      }, true);
       
       // 변경사항 있음 표시
       setHasUnsavedChanges(true);
+      
+      // 드래그 상태 강제 초기화 (이미지 수정 후 캔버스 비활성화 방지)
+      resetDragState();
     } catch (error) {
       console.error('Image edit failed:', error);
       alert(error instanceof Error ? error.message : "이미지 수정 중 오류가 발생했습니다.");
-      setCuts(prevCuts => prevCuts.map(c => 
-        c.id === cutId ? { ...c, isGenerating: false } : c
-      ));
+      
+      // historyCuts 기준으로 에러 상태 업데이트
+      updateHistory({
+        cuts: historyCuts.map(c => 
+          c.id === cutId ? { ...c, isGenerating: false } : c
+        )
+      }, true);
+      
+      // 에러 시에도 드래그 상태 초기화
+      resetDragState();
     }
   };
 
@@ -1018,7 +1024,7 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
 
   // 프로젝트 저장 함수 (간소화)
   const handleSaveProject = async () => {
-    if (!onSave || isAutoSaving || isSaving) return;
+    if (!onSave) return;
     
     setIsSaving(true);
     try {
@@ -1065,47 +1071,42 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
     return false; // 네비게이션 허용
   };
 
-  // 자동 저장 중 플래그
-  const [isAutoSaving, setIsAutoSaving] = useState(false);
-
   // 자동 저장 함수 (페이지 이탈 시)
   const autoSaveProject = async () => {
-    if (!onSave || !hasUnsavedChanges || isAutoSaving) {
-      console.log('자동 저장 조건 미충족:', { 
-        onSave: !!onSave, 
-        hasUnsavedChanges, 
-        isAutoSaving 
-      });
+    if (!onSave || !hasUnsavedChanges || isSaving) {
       return;
     }
     
-    setIsAutoSaving(true);
-    
-    console.log('자동 저장 시작, cuts 개수:', cuts.length);
-    
-    const panelsData = cuts.map((cut, index) => ({
-      id: cut.id,
-      prompt: cut.prompt,
-      imageUrl: cut.imageUrl,
-      generationId: cut.generationId,
-      editData: {
-        elements: cut.elements,
-        canvasRatio: canvasRatio,
-        selectedCharacters: selectedCharacters
-      }
-    }));
-    
-    console.log('자동 저장 데이터:', panelsData);
+    setIsSaving(true);
     
     try {
+      const panelsData = cuts.map((cut, index) => ({
+        id: cut.id,
+        prompt: cut.prompt,
+        imageUrl: cut.imageUrl,
+        generationId: cut.generationId, // generationId 포함
+        editData: {
+          elements: cut.elements,
+          canvasRatio: canvasRatio,
+          selectedCharacters: selectedCharacters
+        }
+      }));
+      
+      
       await onSave(panelsData, initialData?.title);
       setHasUnsavedChanges(false);
-      console.log('프로젝트가 자동 저장되었습니다');
+      
     } catch (error) {
-      console.error('자동 저장 실패:', error);
-      // 에러가 발생해도 플래그는 해제해야 다음 저장이 가능
+      console.error('❌ Auto-save failed:', error);
+      console.error('Auto-save error details:', {
+        message: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : 'No stack trace',
+        cuts: cuts.length,
+        hasOnSave: !!onSave,
+        hasUnsavedChanges
+      });
     } finally {
-      setIsAutoSaving(false);
+      setIsSaving(false);
     }
   };
 
@@ -1128,7 +1129,7 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
       color: '#000000'
     };
 
-    setCuts(prevCuts => prevCuts.map(cut => 
+    setCuts(cuts.map(cut => 
       cut.id === selectedCutId 
         ? { ...cut, elements: [...cut.elements, newElement] }
         : cut
@@ -1157,7 +1158,7 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
       bubbleStyle: style
     };
 
-    setCuts(prevCuts => prevCuts.map(cut => 
+    setCuts(cuts.map(cut => 
       cut.id === selectedCutId 
         ? { ...cut, elements: [...cut.elements, newElement] }
         : cut
@@ -1190,7 +1191,7 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
       strokeWidth: 2 // 기본 테두리 두께
     };
 
-    setCuts(prevCuts => prevCuts.map(cut => 
+    setCuts(cuts.map(cut => 
       cut.id === selectedCutId 
         ? { ...cut, elements: [...cut.elements, newElement] }
         : cut
@@ -1282,7 +1283,7 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
       newY = Math.max(0, Math.min(newY, maxY));
       
       // 요소 업데이트 (리사이즈 중 실시간 업데이트)
-      setCuts(prevCuts => prevCuts.map(cut => ({
+      setCuts(cuts.map(cut => ({
         ...cut,
         elements: cut.elements.map(el => 
           el.id === elementId 
@@ -1305,7 +1306,7 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
 
   const deleteElement = (elementId: string) => {
     // 모든 캔버스에서 해당 요소를 찾아서 삭제
-    setCuts(prevCuts => prevCuts.map(cut => {
+    setCuts(cuts.map(cut => {
       const hasElement = cut.elements.some(el => el.id === elementId);
       if (!hasElement) return cut;
       
@@ -1320,7 +1321,7 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
 
   const updateElementContent = (elementId: string, content: string) => {
     // 모든 캔버스에서 해당 요소를 찾아서 업데이트
-    setCuts(prevCuts => prevCuts.map(cut => {
+    setCuts(cuts.map(cut => {
       const hasElement = cut.elements.some(el => el.id === elementId);
       if (!hasElement) return cut;
       
@@ -1335,7 +1336,7 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
 
   // 범용 요소 속성 업데이트 함수
   const updateElementProperty = useCallback((elementId: string, properties: Partial<CanvasElement>) => {
-    setCuts(prevCuts => prevCuts.map(cut => {
+    setCuts(cuts => cuts.map(cut => {
       const hasElement = cut.elements.some(el => el.id === elementId);
       if (!hasElement) return cut;
       
@@ -1352,7 +1353,7 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
   const deleteGeneratedImage = (cutId: string) => {
     // 확인 다이얼로그
     if (window.confirm('정말로 생성된 이미지를 삭제하시겠습니까?\n삭제된 이미지는 복구할 수 없습니다.')) {
-      setCuts(prevCuts => prevCuts.map(cut => 
+      setCuts(cuts.map(cut => 
         cut.id === cutId 
           ? { ...cut, imageUrl: undefined, generationId: undefined }
           : cut
@@ -1365,7 +1366,7 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
 
   // 프로젝트 저장 함수
   const handleSave = async () => {
-    if (!onSave || isAutoSaving || isSaving) return;
+    if (!onSave) return;
     
     // 빈 캔버스 체크
     const hasContent = cuts.some(cut => {
@@ -1532,6 +1533,141 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
     setDraggedBubbleId(null);
   }, []);
 
+  // AI 캐릭터 생성 함수
+  const handleGenerateCharacter = useCallback(async () => {
+    if (!characterDescription.trim()) {
+      alert('캐릭터 설명을 입력해주세요.');
+      return;
+    }
+
+    try {
+      setIsGeneratingCharacter(true);
+      
+      const response = await fetch('/api/ai/character/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          prompt: characterDescription,
+          style: 'character_reference',
+          aspectRatio: '1:1' // 1:1 비율로 고정
+        })
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'AI 캐릭터 생성에 실패했습니다.');
+      }
+
+      const result = await response.json();
+      setGeneratedCharacterUrl(result.imageUrl);
+      
+    } catch (error) {
+      console.error('캐릭터 생성 실패:', error);
+      alert(error instanceof Error ? error.message : '캐릭터 생성 중 오류가 발생했습니다.');
+    } finally {
+      setIsGeneratingCharacter(false);
+    }
+  }, [characterDescription]);
+
+  // 생성된 캐릭터를 DB에 저장하는 함수 (비차단 처리)
+  const handleAddCharacterToDB = useCallback(async () => {
+    if (!generatedCharacterUrl) return;
+
+    try {
+      setIsAddingCharacterToDB(true);
+      
+      // 사용자 정보 가져오기
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        throw new Error('로그인이 필요합니다');
+      }
+
+      // 사용자 데이터 조회
+      const { data: userData } = await supabase
+        .from('user')
+        .select('id')
+        .eq('supabaseId', user.id)
+        .single();
+
+      if (!userData) {
+        throw new Error('사용자 정보를 찾을 수 없습니다');
+      }
+
+      // 캐릭터명을 설명의 첫 부분에서 생성
+      const characterName = characterDescription.split(',')[0].trim().substring(0, 20) || '새 캐릭터';
+      
+      // 이미지 URL과 레퍼런스 이미지 설정
+      const referenceImages = [generatedCharacterUrl];
+
+      // 1. 즉시 캐릭터 데이터베이스에 기본 정보 저장 (빠른 반응)
+      const { data: character, error } = await supabase
+        .from('character')
+        .insert({
+          userId: userData.id,
+          name: characterName,
+          description: characterDescription.trim(),
+          referenceImages: referenceImages,
+          ratioImages: null, // 처음에는 null로 저장
+          thumbnailUrl: generatedCharacterUrl,
+          isPublic: false,
+          isFavorite: false
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // 2. 즉시 UI 초기화 (사용자가 바로 다른 작업 가능)
+      setCharacterDescription('');
+      setGeneratedCharacterUrl(null);
+      setIsAddingCharacterToDB(false);
+      
+      // 성공 메시지 표시
+      alert('캐릭터가 등록되었습니다! 다양한 비율 이미지를 생성 중입니다...');
+
+      // 3. 백그라운드에서 멀티 비율 이미지 처리 (비차단)
+      console.log('🤖 백그라운드 multi-ratio processing 시작...');
+      
+      // 백그라운드 처리 시작 (비동기)
+      fetch('/api/characters/process-images', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          referenceImages,
+          userId: userData.id
+        })
+      })
+      .then(response => response.json())
+      .then(async (processingResult) => {
+        if (processingResult.success && processingResult.ratioImages) {
+          console.log('✅ 백그라운드 multi-ratio processing 완료:', processingResult.ratioImages);
+          
+          // 4. 처리 완료 후 데이터베이스 업데이트
+          await supabase
+            .from('character')
+            .update({ ratioImages: processingResult.ratioImages })
+            .eq('id', character.id);
+            
+          console.log('✅ 캐릭터 ratioImages 업데이트 완료');
+        } else {
+          console.error('❌ 백그라운드 multi-ratio processing 실패:', processingResult.error);
+        }
+      })
+      .catch((processingError) => {
+        console.error('❌ 백그라운드 multi-ratio processing API 오류:', processingError);
+      });
+      
+    } catch (error) {
+      console.error('캐릭터 생성 실패:', error);
+      alert(error instanceof Error ? error.message : '캐릭터 생성 중 오류가 발생했습니다.');
+      setIsAddingCharacterToDB(false);
+    }
+  }, [generatedCharacterUrl, characterDescription, supabase]);
+
   const menuItems = [
     { id: 'bubble', label: '말풍선', icon: MessageSquare },
     { id: 'text', label: '텍스트', icon: Type },
@@ -1540,6 +1676,18 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
   ];
 
   const quickDialogues = ['안녕?', '뭐야!', '정말?', '좋아!', '싫어', '어?', '와!', '헉!'];
+
+  // 패널 로딩 중일 때 로딩 화면 표시
+  if (!panelsLoaded) {
+    return (
+      <div className="h-screen w-full flex items-center justify-center bg-slate-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">프로젝트를 불러오는 중...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen w-full flex flex-col bg-slate-50 overflow-hidden">
@@ -1576,63 +1724,148 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
             )}
           </Button>
           
-          {/* 캔버스 크기 선택 */}
-          <div className="flex items-center bg-slate-100 relative">
-            {isRatioLocked && (
-              <div className="absolute -bottom-8 left-0 text-xs text-purple-600 bg-purple-50 px-2 py-1 rounded-md border border-purple-200">
-                🔒 첫 번째 이미지 생성 후 캔버스 비율이 고정되었습니다
-              </div>
-            )}
+          {/* 캔버스 크기 선택 - 개선된 반응형 디자인 */}
+          {/* 초대형 화면 (2xl+): 아이콘 + 텍스트 + 해상도 */}
+          <div className="hidden 2xl:flex items-center bg-slate-100 rounded-lg overflow-hidden">
             <button
               className={cn(
-                "flex items-center gap-2 px-4 py-2 transition-all text-sm font-medium",
+                "flex items-center gap-2 px-4 py-2 transition-all text-sm font-medium whitespace-nowrap",
                 canvasRatio === '4:5' 
-                  ? "bg-white shadow-sm text-purple-600 border border-purple-200" 
+                  ? "bg-white shadow-sm text-purple-600 border-r border-purple-200" 
                   : "text-slate-600 hover:text-slate-900",
-                isRatioLocked && canvasRatio !== '4:5' && "opacity-50 cursor-not-allowed"
+                cuts.some(cut => cut.imageUrl) && canvasRatio !== '4:5' && "opacity-50 cursor-not-allowed"
               )}
-              onClick={() => setCanvasRatio('4:5')}
-              disabled={isRatioLocked && canvasRatio !== '4:5'}
-              title={isRatioLocked && canvasRatio !== '4:5' ? '첫 번째 이미지 생성 후 비율 변경 불가' : ''}
+              onClick={() => {
+                if (cuts.some(cut => cut.imageUrl) && canvasRatio !== '4:5') {
+                  alert('이미지가 생성된 컷이 있어 비율을 변경할 수 없습니다.\n새 프로젝트를 만들거나 이미지를 삭제한 후 비율을 변경하세요.');
+                  return;
+                }
+                setCanvasRatio('4:5');
+              }}
             >
-              <RectangleVertical className="h-4 w-4" />
+              <RectangleVertical className="h-4 w-4 flex-shrink-0" />
               <span>{CANVAS_SIZES['4:5'].label}</span>
               <span className="text-xs text-slate-400">{CANVAS_SIZES['4:5'].actualWidth}×{CANVAS_SIZES['4:5'].actualHeight}</span>
-              {isRatioLocked && canvasRatio === '4:5' && <span className="text-xs text-purple-500 font-medium">🔒</span>}
             </button>
             <button
               className={cn(
-                "flex items-center gap-2 px-4 py-2 transition-all text-sm font-medium",
+                "flex items-center gap-2 px-4 py-2 transition-all text-sm font-medium whitespace-nowrap",
                 canvasRatio === '1:1' 
-                  ? "bg-white shadow-sm text-purple-600 border border-purple-200" 
-                  : "text-slate-600 hover:text-slate-900",
-                isRatioLocked && canvasRatio !== '1:1' && "opacity-50 cursor-not-allowed"
+                  ? "bg-white shadow-sm text-purple-600 border-x border-purple-200" 
+                  : "text-slate-600 hover:text-slate-900"
               )}
               onClick={() => setCanvasRatio('1:1')}
-              disabled={isRatioLocked && canvasRatio !== '1:1'}
-              title={isRatioLocked && canvasRatio !== '1:1' ? '첫 번째 이미지 생성 후 비율 변경 불가' : ''}
             >
-              <Square className="h-4 w-4" />
+              <Square className="h-4 w-4 flex-shrink-0" />
               <span>{CANVAS_SIZES['1:1'].label}</span>
               <span className="text-xs text-slate-400">{CANVAS_SIZES['1:1'].actualWidth}×{CANVAS_SIZES['1:1'].actualHeight}</span>
-              {isRatioLocked && canvasRatio === '1:1' && <span className="text-xs text-purple-500 font-medium">🔒</span>}
             </button>
             <button
               className={cn(
-                "flex items-center gap-2 px-4 py-2 transition-all text-sm font-medium",
+                "flex items-center gap-2 px-4 py-2 transition-all text-sm font-medium whitespace-nowrap",
                 canvasRatio === '16:9' 
-                  ? "bg-white shadow-sm text-purple-600 border border-purple-200" 
-                  : "text-slate-600 hover:text-slate-900",
-                isRatioLocked && canvasRatio !== '16:9' && "opacity-50 cursor-not-allowed"
+                  ? "bg-white shadow-sm text-purple-600 border-l border-purple-200" 
+                  : "text-slate-600 hover:text-slate-900"
               )}
               onClick={() => setCanvasRatio('16:9')}
-              disabled={isRatioLocked && canvasRatio !== '16:9'}
-              title={isRatioLocked && canvasRatio !== '16:9' ? '첫 번째 이미지 생성 후 비율 변경 불가' : ''}
             >
-              <Square className="h-4 w-4 rotate-90" />
+              <Square className="h-4 w-4 rotate-90 flex-shrink-0" />
               <span>{CANVAS_SIZES['16:9'].label}</span>
               <span className="text-xs text-slate-400">{CANVAS_SIZES['16:9'].actualWidth}×{CANVAS_SIZES['16:9'].actualHeight}</span>
-              {isRatioLocked && canvasRatio === '16:9' && <span className="text-xs text-purple-500 font-medium">🔒</span>}
+            </button>
+          </div>
+          
+          {/* 중형 화면 (lg-2xl): 아이콘 + 텍스트만 (해상도 숨김) */}
+          <div className="hidden lg:flex 2xl:hidden items-center bg-slate-100 rounded-lg overflow-hidden">
+            <button
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-2 transition-all text-sm font-medium whitespace-nowrap min-w-0",
+                canvasRatio === '4:5' 
+                  ? "bg-white shadow-sm text-purple-600 border-r border-purple-200" 
+                  : "text-slate-600 hover:text-slate-900",
+                cuts.some(cut => cut.imageUrl) && canvasRatio !== '4:5' && "opacity-50 cursor-not-allowed"
+              )}
+              onClick={() => {
+                if (cuts.some(cut => cut.imageUrl) && canvasRatio !== '4:5') {
+                  alert('이미지가 생성된 컷이 있어 비율을 변경할 수 없습니다.\n새 프로젝트를 만들거나 이미지를 삭제한 후 비율을 변경하세요.');
+                  return;
+                }
+                setCanvasRatio('4:5');
+              }}
+            >
+              <RectangleVertical className="h-3.5 w-3.5 flex-shrink-0" />
+              <span className="truncate text-xs">{CANVAS_SIZES['4:5'].label}</span>
+            </button>
+            <button
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-2 transition-all text-sm font-medium whitespace-nowrap min-w-0",
+                canvasRatio === '1:1' 
+                  ? "bg-white shadow-sm text-purple-600 border-x border-purple-200" 
+                  : "text-slate-600 hover:text-slate-900"
+              )}
+              onClick={() => setCanvasRatio('1:1')}
+            >
+              <Square className="h-3.5 w-3.5 flex-shrink-0" />
+              <span className="truncate text-xs">{CANVAS_SIZES['1:1'].label}</span>
+            </button>
+            <button
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-2 transition-all text-sm font-medium whitespace-nowrap min-w-0",
+                canvasRatio === '16:9' 
+                  ? "bg-white shadow-sm text-purple-600 border-l border-purple-200" 
+                  : "text-slate-600 hover:text-slate-900"
+              )}
+              onClick={() => setCanvasRatio('16:9')}
+            >
+              <Square className="h-3.5 w-3.5 rotate-90 flex-shrink-0" />
+              <span className="truncate text-xs">{CANVAS_SIZES['16:9'].label}</span>
+            </button>
+          </div>
+
+          {/* 소형 화면 (lg 미만): 아이콘만 + 툴팁 */}
+          <div className="flex lg:hidden items-center bg-slate-100 rounded-lg overflow-hidden">
+            <button
+              className={cn(
+                "flex items-center justify-center p-2.5 transition-all",
+                canvasRatio === '4:5' 
+                  ? "bg-white shadow-sm text-purple-600" 
+                  : "text-slate-600 hover:text-slate-900",
+                cuts.some(cut => cut.imageUrl) && canvasRatio !== '4:5' && "opacity-50 cursor-not-allowed"
+              )}
+              onClick={() => {
+                if (cuts.some(cut => cut.imageUrl) && canvasRatio !== '4:5') {
+                  alert('이미지가 생성된 컷이 있어 비율을 변경할 수 없습니다.');
+                  return;
+                }
+                setCanvasRatio('4:5');
+              }}
+              title={`${CANVAS_SIZES['4:5'].label} (${CANVAS_SIZES['4:5'].actualWidth}×${CANVAS_SIZES['4:5'].actualHeight})`}
+            >
+              <RectangleVertical className="h-4 w-4" />
+            </button>
+            <button
+              className={cn(
+                "flex items-center justify-center p-2.5 transition-all border-x border-slate-200",
+                canvasRatio === '1:1' 
+                  ? "bg-white shadow-sm text-purple-600" 
+                  : "text-slate-600 hover:text-slate-900"
+              )}
+              onClick={() => setCanvasRatio('1:1')}
+              title={`${CANVAS_SIZES['1:1'].label} (${CANVAS_SIZES['1:1'].actualWidth}×${CANVAS_SIZES['1:1'].actualHeight})`}
+            >
+              <Square className="h-4 w-4" />
+            </button>
+            <button
+              className={cn(
+                "flex items-center justify-center p-2.5 transition-all",
+                canvasRatio === '16:9' 
+                  ? "bg-white shadow-sm text-purple-600" 
+                  : "text-slate-600 hover:text-slate-900"
+              )}
+              onClick={() => setCanvasRatio('16:9')}
+              title={`${CANVAS_SIZES['16:9'].label} (${CANVAS_SIZES['16:9'].actualWidth}×${CANVAS_SIZES['16:9'].actualHeight})`}
+            >
+              <Square className="h-4 w-4 rotate-90" />
             </button>
           </div>
         </div>
@@ -2109,26 +2342,292 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
                 </div>
               )}
 
-              {(activeTab === 'ai-character' || activeTab === 'ai-script') && (
+              {activeTab === 'ai-script' && (
+                <div className="space-y-5">
+                  {/* 스토리 프롬프트 입력 */}
+                  <div className="space-y-3">
+                    <label className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+                      <FileText className="h-4 w-4 text-purple-600" />
+                      스토리 아이디어 
+                      <span className="text-red-500 text-xs">*</span>
+                    </label>
+                    <div className="relative">
+                      <Textarea
+                        value={storyPrompt}
+                        onChange={(e) => setStoryPrompt(e.target.value)}
+                        placeholder="예: 카페에서 우연히 만난 두 사람의 달콤한 만남..."
+                        className="resize-none h-24 text-sm border-slate-300 focus:border-purple-400 focus:ring-purple-400/20 rounded-lg shadow-sm"
+                        disabled={isGeneratingScript}
+                      />
+                      <div className="absolute bottom-2 right-2 text-xs text-slate-400">
+                        {storyPrompt.length}/200
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 컷 수 선택 */}
+                  <div className="space-y-3">
+                    <label className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+                      <Square className="h-4 w-4 text-purple-600" />
+                      컷 수 선택
+                    </label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        { value: '4-5' as const, label: '4-5컷' },
+                        { value: '6-8' as const, label: '6-8컷' },
+                        { value: '9-10' as const, label: '9-10컷' }
+                      ].map((option) => (
+                        <button
+                          key={option.value}
+                          className={cn(
+                            "p-3 border-2 rounded-lg text-center transition-all hover:shadow-sm",
+                            selectedPanelCount === option.value
+                              ? "border-purple-400 bg-gradient-to-br from-purple-50 to-pink-50 shadow-sm"
+                              : "border-slate-200 hover:border-slate-300 bg-white"
+                          )}
+                          onClick={() => setSelectedPanelCount(option.value)}
+                          disabled={isGeneratingScript}
+                        >
+                          <div className="text-sm font-semibold text-slate-800">{option.label}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 캐릭터 선택 */}
+                  <div className="space-y-3">
+                    <label className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+                      <UserPlus className="h-4 w-4 text-purple-600" />
+                      등장 캐릭터 
+                      <span className="text-xs text-slate-500 font-normal">(선택사항)</span>
+                    </label>
+                    {scriptCharacters.length === 0 ? (
+                      <div className="text-center py-6 bg-gradient-to-br from-slate-50 to-slate-100 rounded-lg border border-slate-200">
+                        <div className="w-12 h-12 bg-slate-200 rounded-full mx-auto mb-3 flex items-center justify-center">
+                          <User className="h-6 w-6 text-slate-400" />
+                        </div>
+                        <p className="text-sm text-slate-500 font-medium">등록된 캐릭터가 없습니다</p>
+                        <p className="text-xs text-slate-400 mt-1">먼저 캐릭터를 추가해보세요</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2 max-h-36 overflow-y-auto custom-scrollbar">
+                        {scriptCharacters.map((character) => (
+                          <div
+                            key={character.id}
+                            className={cn(
+                              "flex items-center gap-3 p-3 border-2 rounded-lg cursor-pointer transition-all hover:shadow-sm",
+                              selectedScriptCharacters.includes(character.id)
+                                ? "border-purple-400 bg-gradient-to-r from-purple-50 to-pink-50 shadow-sm"
+                                : "border-slate-200 hover:border-slate-300 bg-white"
+                            )}
+                            onClick={() => handleScriptCharacterToggle(character.id)}
+                          >
+                            {/* 캐릭터 아바타 */}
+                            <div className="relative flex-shrink-0">
+                              {character.thumbnailUrl ? (
+                                <img
+                                  src={character.thumbnailUrl}
+                                  alt={character.name}
+                                  className="w-10 h-10 rounded-full object-cover border-2 border-white shadow-sm"
+                                />
+                              ) : (
+                                <div className="w-10 h-10 bg-gradient-to-br from-purple-400 to-pink-400 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-sm">
+                                  {character.name.charAt(0)}
+                                </div>
+                              )}
+                              {selectedScriptCharacters.includes(character.id) && (
+                                <div className="absolute -top-1 -right-1 w-5 h-5 bg-green-500 rounded-full flex items-center justify-center border-2 border-white">
+                                  <Check className="h-3 w-3 text-white" />
+                                </div>
+                              )}
+                            </div>
+
+                            {/* 캐릭터 정보 */}
+                            <div className="flex-1 min-w-0">
+                              <div className="font-semibold text-sm text-slate-800 truncate">
+                                {character.name}
+                              </div>
+                              <div className="text-xs text-slate-500 truncate leading-relaxed">
+                                {character.description || '설명이 없습니다'}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 생성 버튼 */}
+                  <Button
+                    onClick={generateScript}
+                    disabled={!storyPrompt.trim() || isGeneratingScript}
+                    className="w-full h-12 bg-gradient-to-r from-purple-600 via-purple-600 to-pink-600 hover:from-purple-700 hover:via-purple-700 hover:to-pink-700 shadow-lg hover:shadow-xl transition-all duration-200 text-white font-semibold"
+                    size="lg"
+                  >
+                    {isGeneratingScript ? (
+                      <>
+                        <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                        대본 생성 중...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="h-5 w-5 mr-2" />
+                        AI 대본 생성하기
+                      </>
+                    )}
+                  </Button>
+
+                  {/* 생성된 대본 결과 */}
+                  {generatedScript.length > 0 && (
+                    <div className="space-y-4 border-t-2 border-slate-200 pt-5">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                          <FileText className="h-4 w-4 text-green-600" />
+                          생성된 대본 ({generatedScript.length}개 컷)
+                        </h4>
+                        <Button
+                          onClick={useGeneratedScript}
+                          size="sm"
+                          className="bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-semibold shadow-md hover:shadow-lg transition-all"
+                        >
+                          <Zap className="h-4 w-4 mr-1" />
+                          웹툰에 적용
+                        </Button>
+                      </div>
+                      
+                      <div className="space-y-3 max-h-72 overflow-y-auto custom-scrollbar">
+                        {generatedScript.map((panel, index) => (
+                          <div
+                            key={index}
+                            className="bg-gradient-to-br from-slate-50 to-slate-100 border border-slate-200 rounded-lg p-4 shadow-sm hover:shadow-md transition-all"
+                          >
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex items-center gap-2">
+                                <div className="bg-gradient-to-r from-purple-500 to-pink-500 text-white px-3 py-1 rounded-full text-xs font-bold shadow-sm">
+                                  {index + 1}컷
+                                </div>
+                                {panel.characters && panel.characters.length > 0 && (
+                                  <div className="text-xs text-slate-500">
+                                    👤 {panel.characters.length}명
+                                  </div>
+                                )}
+                              </div>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0 hover:bg-white/50 rounded-full"
+                                onClick={() => copyScriptPrompt(panel.prompt, index)}
+                              >
+                                {scriptCopiedIndex === index ? (
+                                  <Check className="h-4 w-4 text-green-600" />
+                                ) : (
+                                  <Copy className="h-4 w-4 text-slate-600" />
+                                )}
+                              </Button>
+                            </div>
+                            
+                            <p className="text-slate-700 leading-relaxed text-sm mb-3 font-medium">
+                              {panel.prompt}
+                            </p>
+                            
+                            {panel.characters && panel.characters.length > 0 && (
+                              <div className="flex flex-wrap gap-1">
+                                {panel.characters.map((charName: string, charIndex: number) => (
+                                  <span key={charIndex} className="bg-blue-100 text-blue-700 px-2 py-1 rounded-full text-xs font-medium">
+                                    {charName}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {activeTab === 'ai-character' && (
                 <div className="space-y-4">
-                  <div>
-                    <label className="text-sm font-medium text-slate-700 mb-2 block">
-                      {activeTab === 'ai-character' ? '캐릭터 설명' : '줄거리 입력'}
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-slate-700">
+                      캐릭터 설명 <span className="text-red-500">*</span>
                     </label>
                     <Textarea 
-                      placeholder={
-                        activeTab === 'ai-character' 
-                          ? '캐릭터의 외모와 특징을 설명해주세요...'
-                          : '간단한 줄거리를 입력하세요...'
-                      }
+                      value={characterDescription}
+                      onChange={(e) => setCharacterDescription(e.target.value.substring(0, 300))}
+                      placeholder="캐릭터의 외모와 특징을 설명해주세요..."
                       className="min-h-[100px] text-sm resize-none border-slate-200"
+                      maxLength={300}
                     />
+                    <div className="flex justify-between items-center text-xs text-gray-500">
+                      <span>자세히 입력할수록 좋은 캐릭터가 생성돼요!</span>
+                      <span>{characterDescription.length}/300</span>
+                    </div>
                   </div>
-                  
-                  <Button className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700" size="sm">
-                    <Sparkles className="h-4 w-4 mr-2" />
-                    {activeTab === 'ai-character' ? '캐릭터 생성' : '대본 생성'}
+
+                  {/* 가로 세로 비율 (1:1 고정 표시) */}
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-slate-700">
+                      가로 세로 비율
+                    </label>
+                    <div className="p-3 border-2 border-green-300 bg-green-50 rounded-lg text-center">
+                      <div className="text-lg font-medium text-green-700">1:1</div>
+                    </div>
+                  </div>
+
+                  {/* 캐릭터 생성 버튼 */}
+                  <Button 
+                    onClick={handleGenerateCharacter}
+                    disabled={isGeneratingCharacter || !characterDescription.trim()}
+                    className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700" 
+                    size="sm"
+                  >
+                    {isGeneratingCharacter ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        생성 중...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="h-4 w-4 mr-2" />
+                        캐릭터 생성
+                      </>
+                    )}
                   </Button>
+
+                  {/* 생성된 캐릭터 이미지 표시 */}
+                  {generatedCharacterUrl && (
+                    <div className="space-y-3">
+                      <div className="relative">
+                        <img
+                          src={generatedCharacterUrl}
+                          alt="생성된 캐릭터"
+                          className="w-full rounded-lg border border-slate-200"
+                        />
+                      </div>
+                      
+                      {/* 캐릭터 추가 버튼 */}
+                      <Button
+                        onClick={handleAddCharacterToDB}
+                        disabled={isAddingCharacterToDB}
+                        className="w-full bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700"
+                        size="sm"
+                      >
+                        {isAddingCharacterToDB ? (
+                          <>
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            캐릭터 추가 중...
+                          </>
+                        ) : (
+                          <>
+                            <Plus className="h-4 w-4 mr-2" />
+                            캐릭터 추가하기
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -2158,12 +2657,12 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
             className="flex-1 overflow-auto bg-slate-50"
             style={{ isolation: 'isolate' }}
           >
-            {/* 캔버스 래퍼 - 줌 레벨에 따른 최적화된 동적 패딩으로 캔버스 겹침 방지 */}
+            {/* 캔버스 래퍼 - 충분한 패딩으로 캔버스 간격 보장 */}
             <div 
               className="min-h-full flex flex-col items-center py-12"
               style={{
-                paddingLeft: `${Math.max(150, 200 * Math.sqrt(zoom / 100))}px`,
-                paddingRight: `${Math.max(150, 200 * Math.sqrt(zoom / 100))}px`,
+                paddingLeft: '200px',
+                paddingRight: '200px',
               }}
             >
               {cuts.map((cut, index) => {
@@ -2171,8 +2670,8 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
                 const scaledWidth = CANVAS_SIZES[canvasRatio].width * (zoom / 100);
                 const scaledHeight = CANVAS_SIZES[canvasRatio].height * (zoom / 100);
                 
-                // 마진 계산 - 줌 레벨에 비례한 동적 마진으로 캔버스 겹침 방지
-                const marginBottom = Math.max(60, 80 * (zoom / 100));
+                // 마진 계산 - 배율이 커질수록 마진도 증가
+                const marginBottom = Math.max(60, 100 * (zoom / 100));
                 
                 return (
                   <div
@@ -2255,28 +2754,15 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
                     {/* 캔버스 */}
                     <div
                       className={cn(
-                        "bg-white shadow-lg overflow-hidden cursor-pointer relative border-2 transition-all",
+                        "w-full h-full bg-white shadow-lg overflow-hidden cursor-pointer relative border-2 transition-all",
                         selectedCutId === cut.id ? "border-purple-500" : "border-slate-300 hover:border-slate-400",
                         isDraggingBubble && selectedCutId === cut.id && "border-purple-400 bg-purple-50"
                       )}
-                      style={{
-                        width: `${scaledWidth}px`,
-                        height: `${scaledHeight}px`
-                      }}
                       onClick={() => {
-                        // 캔버스 전환 시작
-                        setIsCanvasSwitching(true);
-                        console.log('🔄 캔버스 전환 시작:', { from: selectedCutId, to: cut.id });
-                        
                         setSelectedCutId(cut.id);
                         setSelectedElementId(null);
+                        setTempCuts(null); // tempCuts 초기화로 이미지 보존
                         scrollToCanvas(cut.id);
-                        
-                        // 캔버스 전환 완료 - 잠시 후 자동 저장 재개
-                        setTimeout(() => {
-                          console.log('✅ 캔버스 전환 완료');
-                          setIsCanvasSwitching(false);
-                        }, 1000); // 1초 후 자동 저장 재개
                       }}
                       onDragOver={(e) => {
                         e.preventDefault(); // 드롭 허용
@@ -2325,7 +2811,7 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
                         };
                         
                         // 캔버스에 요소 추가
-                        setCuts(prevCuts => prevCuts.map(c => 
+                        setCuts(cuts.map(c => 
                           c.id === cut.id 
                             ? { ...c, elements: [...c.elements, newElement] }
                             : c
@@ -2335,12 +2821,26 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
                         setSelectedElementId(newElement.id);
                       }}
                     >
-                      {/* 배경 이미지 - 캔버스에 꽉 차도록 설정 */}
+                      {/* 배경 이미지 */}
                       {cut.imageUrl ? (
                         <img 
                           src={cut.imageUrl} 
                           alt={`${index + 1}컷`}
-                          className="absolute inset-0 w-full h-full object-cover"
+                          className={cn(
+                            "absolute inset-0 w-full h-full cursor-pointer",
+                            selectedElementId === `bg-image-${cut.id}` && "ring-2 ring-purple-400 ring-opacity-75"
+                          )}
+                          style={{
+                            objectFit: 'fill', // 강제로 꽉 채우기
+                            objectPosition: 'center'
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            // 이미지 클릭 시에도 캔버스 선택
+                            setSelectedCutId(cut.id);
+                            setSelectedElementId(`bg-image-${cut.id}`);
+                            scrollToCanvas(cut.id);
+                          }}
                         />
                       ) : (
                         <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400">
@@ -2445,7 +2945,7 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
                               // 미리캔버스식 끊김 효과: 캔버스 외부에서는 요소를 숨김
                               if (!isOverCanvas) {
                                 // 캔버스 외부에서는 요소를 임시로 숨김
-                                setCuts(prevCuts => prevCuts.map(c => ({
+                                setCuts(cuts.map(c => ({
                                   ...c,
                                   elements: c.elements.map(el => 
                                     el.id === element.id 
@@ -2473,44 +2973,46 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
                               // 캔버스가 바뀌었는지 확인
                               if (targetCutId !== currentCutId) {
                                 // 캔버스 간 이동
-                                setCuts(prevCuts => {
-                                  let movingElement = null;
-                                  let newCuts = prevCuts.map(c => {
-                                    if (c.id === currentCutId) {
-                                      const foundElement = c.elements.find(el => el.id === element.id);
-                                      if (foundElement) {
-                                        movingElement = foundElement;
+                                let movingElement: any = null;
+                                let updatedCuts = cuts.map(c => {
+                                  if (c.id === currentCutId) {
+                                    // 현재 캔버스에서 요소 찾기
+                                    const foundElement = c.elements.find(el => el.id === element.id);
+                                    if (foundElement) {
+                                      movingElement = foundElement;
+                                      // 현재 캔버스에서 제거
+                                      return {
+                                        ...c,
+                                        elements: c.elements.filter(el => el.id !== element.id)
+                                      };
+                                    }
+                                  }
+                                  return c;
+                                });
+                                
+                                // 새 캔버스에 추가
+                                if (movingElement) {
+                                  updatedCuts = updatedCuts.map(c => {
+                                    if (c.id === targetCutId) {
+                                      // 중복 방지: 이미 같은 ID의 요소가 있는지 확인
+                                      const alreadyExists = c.elements.some(el => el.id === element.id);
+                                      if (!alreadyExists) {
                                         return {
                                           ...c,
-                                          elements: c.elements.filter(el => el.id !== element.id)
+                                          elements: [...c.elements, {
+                                            ...movingElement,
+                                            x: constrainedX,
+                                            y: constrainedY,
+                                            isHiddenWhileDragging: false
+                                          }]
                                         };
                                       }
                                     }
                                     return c;
                                   });
-                                  
-                                  if (movingElement) {
-                                    newCuts = newCuts.map(c => {
-                                      if (c.id === targetCutId) {
-                                        const alreadyExists = c.elements.some(el => el.id === element.id);
-                                        if (!alreadyExists) {
-                                          return {
-                                            ...c,
-                                            elements: [...c.elements, {
-                                              ...movingElement,
-                                              x: constrainedX,
-                                              y: constrainedY,
-                                              isHiddenWhileDragging: false
-                                            }]
-                                          };
-                                        }
-                                      }
-                                      return c;
-                                    });
-                                  }
-                                  
-                                  return newCuts;
-                                });
+                                }
+                                
+                                setCuts(updatedCuts);
                                 
                                 // 현재 캔버스 ID 업데이트
                                 currentCutId = targetCutId;
@@ -2518,7 +3020,7 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
                                 setSelectedCutId(targetCutId);
                               } else {
                                 // 같은 캔버스 내에서 이동 - 실시간 업데이트
-                                setCuts(prevCuts => prevCuts.map(c => ({
+                                setCuts(cuts.map(c => ({
                                   ...c,
                                   elements: c.elements.map(el => 
                                     el.id === element.id 
@@ -2793,7 +3295,7 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
                     AI 프롬프트
                   </label>
                   <Textarea
-                    value={tempPrompts[selectedCut.id] ?? selectedCut.prompt}
+                    value={selectedCut.prompt}
                     onChange={(e) => updateCutPrompt(selectedCut.id, e.target.value)}
                     placeholder="AI가 생성할 장면을 자세히 설명하세요...&#10;예: 햇살이 비치는 카페에서 커피를 마시며 미소짓는 20대 여성, 창가 자리, 따뜻한 조명, 부드러운 웹툰 스타일"
                     className="min-h-[120px] text-sm resize-none border-slate-200"
@@ -2807,7 +3309,7 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
                     generateImage(selectedCut.id);
                     scrollToCanvas(selectedCut.id); // 이미지 생성 시 해당 캔버스를 상단으로 이동
                   }}
-                  disabled={!(tempPrompts[selectedCut.id] ?? selectedCut.prompt).trim() || selectedCut.isGenerating}
+                  disabled={!selectedCut.prompt.trim() || selectedCut.isGenerating}
                 >
                   {selectedCut.isGenerating ? (
                     <>
@@ -2897,7 +3399,7 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
                       <img 
                         src={selectedCut.imageUrl} 
                         alt="생성된 이미지"
-                        className="w-full h-full object-cover"
+                        className="w-full h-full object-fill"
                       />
                     </div>
                     <div className="grid grid-cols-2 gap-2">
@@ -2980,6 +3482,16 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
         </DialogContent>
       </Dialog>
 
+      {/* AI 대본 생성기 모달 */}
+      <Dialog open={showAIScriptModal} onOpenChange={setShowAIScriptModal}>
+        <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
+          <AIScriptGenerator 
+            onScriptGenerated={handleScriptGenerated}
+            className="border-0 shadow-none"
+          />
+        </DialogContent>
+      </Dialog>
+
       {/* 캐릭터 추가 모달 */}
       <AddCharacterModal
         open={addCharacterModalOpen}
@@ -3031,25 +3543,6 @@ export function MiriCanvasStudioUltimate({ projectId, initialData, onSave }: Mir
           </div>
         </DialogContent>
       </Dialog>
-
-      {/* 비율 변경 확인 다이얼로그 */}
-      <RatioChangeConfirmDialog
-        open={ratioChangeDialog.open}
-        onOpenChange={(open) => setRatioChangeDialog(prev => ({ ...prev, open }))}
-        currentRatio={canvasRatio}
-        targetRatio={ratioChangeDialog.targetRatio || '1:1'}
-        onConfirm={handleNewStudioConfirm}
-        onCancel={handleRatioChangeCancel}
-      />
-
-      {/* 초기 비율 선택 다이얼로그 */}
-      <InitialRatioSelectionDialog
-        open={initialRatioDialog.open}
-        onOpenChange={(open) => setInitialRatioDialog(prev => ({ ...prev, open }))}
-        onConfirm={handleInitialRatioConfirm}
-        onCancel={handleInitialRatioCancel}
-        currentRatio={canvasRatio}
-      />
 
       {/* 저장 성공 알림 */}
       {showSaveSuccess && (

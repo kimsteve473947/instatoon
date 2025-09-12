@@ -2,9 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { nanoBananaService } from "@/lib/ai/nano-banana-service";
 import { tokenManager } from "@/lib/subscription/token-manager";
-import { memoryCache } from "@/lib/cache/memory-cache";
-import { canUploadFile, updateStorageUsage, saveFileMetadata } from "@/lib/storage/storage-manager";
-import { randomUUID } from 'crypto';
+import { canUploadFile } from "@/lib/storage/storage-manager";
+import { characterReferenceManager } from "@/lib/ai/character-reference-manager";
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -12,27 +11,19 @@ export const maxDuration = 30; // 30초 타임아웃
 
 export async function POST(request: NextRequest) {
   try {
-    const isDevelopment = process.env.NODE_ENV === 'development';
-    let userId: string;
+    // 실제 사용자 인증 (실제 서비스 준비 완료)
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
     
-    if (isDevelopment) {
-      // 개발 모드: 가상의 사용자 ID 사용
-      userId = 'dev-user-id';
-      console.log('Development mode: Using mock user ID');
-    } else {
-      // 프로덕션 모드: 실제 인증 확인
-      const supabase = await createClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) {
-        return NextResponse.json(
-          { success: false, error: "인증이 필요합니다" },
-          { status: 401 }
-        );
-      }
-      
-      userId = user.id;
+    if (!user) {
+      return NextResponse.json(
+        { success: false, error: "인증이 필요합니다" },
+        { status: 401 }
+      );
     }
+    
+    const userId = user.id;
+    console.log(`👤 인증된 사용자: ${userId}`);
 
     const body = await request.json();
     const { prompt, characterIds, projectId, panelId, settings, aspectRatio } = body;
@@ -46,31 +37,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 개발 모드에서는 토큰 체크 우회
-    let balanceInfo;
-    
-    if (isDevelopment) {
-      // 개발 모드: 충분한 토큰이 있다고 가정
-      balanceInfo = {
-        balance: 1000,
-        used: 0,
-        total: 1000,
-        dailyUsed: 0,
-        dailyLimit: 100,
-        estimatedImagesRemaining: 1000,
-      };
-    } else {
-      // 프로덕션 모드: 실제 토큰 잔액 확인
-      balanceInfo = await tokenManager.getBalance(userId);
-    }
+    // 실제 토큰 잔액 확인 (실제 서비스 준비 완료)
+    const balanceInfo = await tokenManager.getBalance(userId);
     
     // 이미지 생성 옵션 설정
     const imageCount = settings?.batchCount || 1; // 배치 생성 개수
     const highResolution = settings?.highResolution || false;
     const saveCharacter = settings?.saveCharacter || false;
     
-    // 사전 토큰 체크 (개발 모드가 아닌 경우만)
-    if (!isDevelopment && balanceInfo.estimatedImagesRemaining < imageCount) {
+    // 사전 토큰 체크
+    if (balanceInfo.estimatedImagesRemaining < imageCount) {
       return NextResponse.json(
         { 
           success: false, 
@@ -83,8 +59,8 @@ export async function POST(request: NextRequest) {
       );
     }
     
-    // 일일 한도 체크 (개발 모드가 아닌 경우만)
-    if (!isDevelopment && balanceInfo.dailyUsed + imageCount > balanceInfo.dailyLimit) {
+    // 일일 한도 체크
+    if (balanceInfo.dailyUsed + imageCount > balanceInfo.dailyLimit) {
       return NextResponse.json(
         { 
           success: false, 
@@ -98,351 +74,125 @@ export async function POST(request: NextRequest) {
     // 예상 파일 크기 체크 (이미지당 약 500KB로 추정)
     const estimatedFileSize = imageCount * 500 * 1024; // 500KB per image
     
-    // 용량 체크 (개발 모드가 아닌 경우만)
-    if (!isDevelopment) {
-      const supabase = await createClient();
-      const { data: userData } = await supabase
-        .from('user')
-        .select('id')
-        .eq('supabaseId', userId)
-        .single();
+    // 저장 용량 체크
+    const { data: userData } = await supabase
+      .from('user')
+      .select('id')
+      .eq('supabaseId', userId)
+      .single();
+    
+    if (userData) {
+      const storageCheck = await canUploadFile(userData.id, estimatedFileSize);
       
-      if (userData) {
-        const storageCheck = await canUploadFile(userData.id, estimatedFileSize);
-        
-        if (!storageCheck.canUpload) {
-          return NextResponse.json(
-            { 
-              success: false, 
-              error: "저장 공간이 부족합니다. 파일을 삭제하거나 멤버십을 업그레이드하세요.",
-              storageInfo: {
-                used: storageCheck.usedBytes,
-                max: storageCheck.maxBytes,
-                remaining: storageCheck.remainingBytes,
-                usagePercentage: storageCheck.usagePercentage
-              }
-            },
-            { status: 507 } // Insufficient Storage
-          );
-        }
+      if (!storageCheck.canUpload) {
+        return NextResponse.json(
+          { 
+            success: false, 
+            error: "저장 공간이 부족합니다. 파일을 삭제하거나 멤버십을 업그레이드하세요.",
+            storageInfo: {
+              used: storageCheck.usedBytes,
+              max: storageCheck.maxBytes,
+              remaining: storageCheck.remainingBytes,
+              usagePercentage: storageCheck.usagePercentage
+            }
+          },
+          { status: 507 } // Insufficient Storage
+        );
       }
     }
 
-    // 캐릭터 정보 가져오기 (캐싱 적용)
-    const characterDescriptions = new Map<string, string>();
-    const referenceImages: string[] = [];
-    const supabase = await createClient();
+    // 비율 설정
+    const ratio = aspectRatio || settings?.aspectRatio || '4:5';
+    const width = ratio === '16:9' ? 1920 : ratio === '1:1' ? 1024 : 896;
+    const height = ratio === '16:9' ? 1080 : ratio === '1:1' ? 1024 : 1152;
+    console.log(`🔧 이미지 생성: ${ratio} 비율 (${width}x${height})`);
+
+    // 캐릭터 레퍼런스 처리
+    console.log('📝 캐릭터 ID들:', characterIds);
     
+    let enhancedPrompt = prompt;
+    let referenceImages: string[] = [];
+    let characterDescriptions = "";
+
     if (characterIds && characterIds.length > 0) {
       try {
-        // 캐시 키 생성
-        const cacheKey = `characters:${userId}:${characterIds.sort().join(',')}`;
-        let characters = memoryCache.get<any[]>(cacheKey);
+        // 선택된 캐릭터들로 프롬프트 향상 (프로젝트 비율 전달)
+        const promptEnhancement = await characterReferenceManager.enhancePromptWithSelectedCharacters(
+          userId,
+          prompt,
+          characterIds,
+          ratio as '4:5' | '1:1' | '16:9' // 프로젝트 비율 전달
+        );
+
+        enhancedPrompt = promptEnhancement.enhancedPrompt;
+        referenceImages = promptEnhancement.referenceImages;
+        characterDescriptions = promptEnhancement.characterDescriptions;
         
-        if (!characters) {
-          const { data: charactersData } = await supabase
-            .from('character')
-            .select('*')
-            .in('id', characterIds);
-          
-          characters = charactersData || [];
-          // 5분간 캐싱
-          if (characters.length > 0) {
-            memoryCache.set(cacheKey, characters, 300000);
-          }
-        }
-        
-        characters.forEach(char => {
-          characterDescriptions.set(char.name, char.description);
-          
-          // 비율별 이미지가 있으면 aspect ratio에 맞는 이미지 사용, 없으면 원본 이미지 사용
-          let characterImages: string[] = [];
-          
-          if (char.ratioImages && aspectRatio) {
-            console.log(`🎯 Using ratio images for ${char.name}, aspect ratio: ${aspectRatio}`);
-            const ratioImages = char.ratioImages as any;
-            
-            // 요청된 aspectRatio에 해당하는 이미지들 가져오기
-            if (ratioImages[aspectRatio] && ratioImages[aspectRatio].length > 0) {
-              characterImages = ratioImages[aspectRatio].slice(0, 2); // 최대 2개
-              console.log(`✅ Found ${characterImages.length} images for ${aspectRatio} ratio`);
-            } else {
-              console.log(`⚠️ No ratio images found for ${aspectRatio}, fallback to original`);
-              // 비율별 이미지가 없으면 원본 이미지 사용
-              if (char.referenceImages) {
-                characterImages = (char.referenceImages as string[]).slice(0, 2);
-              }
-            }
-          } else {
-            console.log(`📷 Using original reference images for ${char.name}`);
-            // ratioImages가 없거나 aspectRatio가 없으면 원본 이미지 사용
-            if (char.referenceImages) {
-              characterImages = (char.referenceImages as string[]).slice(0, 2);
-            }
-          }
-          
-          if (characterImages.length > 0) {
-            referenceImages.push(...characterImages);
-            console.log(`📸 Added ${characterImages.length} character images for ${char.name}`);
-          }
-        });
-      } catch (dbError) {
-        if (isDevelopment) {
-          console.warn("개발 모드: 캐릭터 로드 실패 (계속 진행):", dbError);
-        } else {
-          console.error("캐릭터 로드 실패:", dbError);
-        }
+        console.log(`🎭 캐릭터 레퍼런스 적용: ${promptEnhancement.detectedCharacters.length}개 캐릭터`);
+        console.log(`📚 레퍼런스 이미지: ${referenceImages.length}개`);
+      } catch (error) {
+        console.warn('캐릭터 레퍼런스 처리 실패:', error);
+        // 캐릭터 처리가 실패해도 기본 프롬프트로 계속 진행
       }
     }
 
-    // 프롬프트 개선은 나노바나나 서비스 내부에서 처리
-    // 캐릭터 자동 감지를 포함하여
-
-    // 내부 비율 최적화 처리 (사용자 투명)
-    const ratio = aspectRatio || settings?.aspectRatio || '4:5';
-    console.log('🔍 Aspect Ratio Debug:', {
-      received_aspectRatio: aspectRatio,
-      settings_aspectRatio: settings?.aspectRatio,
-      final_ratio: ratio,
-      request_body: { aspectRatio, settings }
-    });
-    
-    let width, height;
-    switch(ratio) {
-      case '16:9':
-        width = 1920;
-        height = 1080;
-        break;
-      case '1:1':
-        width = 1024;  // 완벽한 정사각형
-        height = 1024;
-        break;
-      case '4:5':
-      default:
-        width = 1024;  // 인스타그램 최적화
-        height = 1280;
-        break;
-    }
-    
-    console.log(`🔧 Internal processing: Auto-optimizing for ${ratio} ratio (${width}x${height})`);
-
-    // 🚨 API 라우트 디버깅: 나노바나나 서비스 호출 직전
-    console.log('🔥 ================================================================');
-    console.log('🔥 API ROUTE: 나노바나나 서비스 호출 시작');
-    console.log('🔥 ================================================================');
-    console.log('📝 Final prompt to nano banana:', prompt);
-    console.log('🎯 Aspect ratio:', ratio);
-    console.log('📐 Dimensions:', width, 'x', height);
-    console.log('👥 Character IDs:', characterIds);
-    console.log('🖼️ Reference images count:', referenceImages.length);
-    console.log('🔥 ================================================================');
-    
-    // Nano Banana로 이미지 생성 (선택된 캐릭터 참조 포함)
+    // 나노바나나로 이미지 생성 (캐릭터 정보 포함)
     const result = await nanoBananaService.generateWebtoonPanel(
-      prompt, // 원본 프롬프트 전달 (내부에서 개선)
+      enhancedPrompt,
       {
-        userId, // 사용자 ID로 캐릭터 자동 로드
-        selectedCharacterIds: characterIds, // 선택된 캐릭터 ID들 전달
-        referenceImages,
-        characterDescriptions: characterIds?.length > 0 ? characterDescriptions : undefined,
-        style: settings?.style || "Korean webtoon style",
-        negativePrompt: settings?.negativePrompt,
+        userId: userId,
+        selectedCharacterIds: characterIds,
+        referenceImages: referenceImages,
+        characterDescriptions: new Map(characterIds?.map((id: string) => [id, characterDescriptions]) || []),
         aspectRatio: ratio,
         width: width,
         height: height
       }
     );
 
-    // 🚨 API 라우트 디버깅: 나노바나나 서비스 호출 완료
-    console.log('✅ ================================================================');
-    console.log('✅ API ROUTE: 나노바나나 서비스 호출 완료');
-    console.log('✅ ================================================================');
-    console.log('🖼️ Result image URL:', result.imageUrl);
-    console.log('📎 Result thumbnail URL:', result.thumbnailUrl);
-    console.log('⚡ Result tokens used:', result.tokensUsed);
-    console.log('⏱️ Result generation time:', result.generationTime, 'ms');
-    console.log('👥 Result detected characters:', result.detectedCharacters);
-    console.log('✅ ================================================================');
-
-    // 토큰 차감 (개발 모드에서는 우회)
-    let tokenResult;
+    // 실제 토큰 차감
+    const tokenResult = await tokenManager.useTokensForImage(
+      userId, 
+      imageCount,
+      { highResolution, saveCharacter }
+    );
     
-    if (isDevelopment) {
-      // 개발 모드: 토큰 차감을 건너뜀
-      tokenResult = {
-        success: true,
-        remainingTokens: 999,
-        dailyRemaining: 99,
-      };
-    } else {
-      // 프로덕션 모드: 실제 토큰 차감
-      tokenResult = await tokenManager.useTokensForImage(
-        userId, 
-        imageCount,
-        { highResolution, saveCharacter }
+    if (!tokenResult.success) {
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: tokenResult.error || "토큰 차감 실패",
+          remainingTokens: tokenResult.remainingTokens,
+          dailyRemaining: tokenResult.dailyRemaining
+        },
+        { status: 500 }
       );
-      
-      if (!tokenResult.success) {
-        return NextResponse.json(
-          { 
-            success: false, 
-            error: tokenResult.error || "토큰 차감 실패",
-            remainingTokens: tokenResult.remainingTokens,
-            dailyRemaining: tokenResult.dailyRemaining
-          },
-          { status: 500 }
-        );
-      }
     }
 
-    // 사용자 정보 조회
-    let userData;
-    try {
-      const { data: userRecord } = await supabase
-        .from('user')
-        .select('id')
-        .eq('supabaseId', isDevelopment ? 'dev-user-id' : userId)
-        .single();
-      
-      userData = userRecord;
-    } catch (dbError) {
-      if (isDevelopment) {
-        console.warn("개발 모드: DB 연결 실패, 가상 사용자 사용");
-        userData = null;
-      } else {
-        console.error("사용자 조회 실패:", dbError);
-      }
-    }
+    // 사용자 정보 조회 (이미 위에서 조회했으므로 재사용)
+    // userData는 이미 위에서 조회됨
 
-    // 생성 기록 저장 (개발/프로덕션 모드 통합)
-    let generation;
+    // 단순한 생성 기록
+    const generation = {
+      id: `gen-${Date.now()}`,
+      imageUrl: result.imageUrl,
+      tokensUsed: result.tokensUsed,
+    };
     
-    if (isDevelopment) {
-      // 개발 모드: 가상의 생성 기록 (UUID 형식 사용)
-      generation = {
-        id: randomUUID(),
-        userId: userData?.id || randomUUID(),
-        projectId: projectId || null,
-        panelId: panelId || null,
-        characterId: characterIds?.[0] || null,
-        prompt,
-        imageUrl: result.imageUrl,
-        tokensUsed: result.tokensUsed,
-        model: "gemini-2.5-flash-image-preview",
-        createdAt: new Date(),
-      };
-      
-      // 개발 모드에서 DB 사용 가능하면 저장 시도
-      if (userData) {
-        try {
-          const { data: genData } = await supabase
-            .from('generation')
-            .insert({
-              userId: userData.id,
-              projectId: projectId || null,
-              panelId: panelId || null,
-              characterId: characterIds?.[0] || null,
-              prompt: prompt,
-              imageUrl: result.imageUrl,
-              tokensUsed: result.tokensUsed,
-              model: "gemini-2.5-flash-image-preview",
-              metadata: {
-                detectedCharacters: result.detectedCharacters,
-                generationTime: result.generationTime,
-                thumbnailUrl: result.thumbnailUrl,
-                isDevelopment: true,
-              },
-            })
-            .select()
-            .single();
-          
-          if (genData) {
-            generation = genData;
-          }
-        } catch (dbError) {
-          console.warn("개발 모드 DB 저장 실패 (계속 진행):", dbError);
-        }
-      }
-    } else {
-      // 프로덕션 모드: 실제 DB 저장
-      if (!userData) {
-        return NextResponse.json(
-          { success: false, error: "사용자 정보를 찾을 수 없습니다" },
-          { status: 404 }
-        );
-      }
+    console.log('💾 생성 완료:', generation.id);
 
-      console.log('💾 Saving to generation table with projectId:', projectId, 'userId:', userData.id);
-      
-      const { data: genData, error: genError } = await supabase
-        .from('generation')
-        .insert({
-          userId: userData.id,
-          projectId: projectId || null,
-          panelId: panelId || null,
-          characterId: characterIds?.[0] || null,
-          prompt: prompt,
-          imageUrl: result.imageUrl,
-          tokensUsed: result.tokensUsed,
-          model: "gemini-2.5-flash-image-preview",
-          metadata: {
-            detectedCharacters: result.detectedCharacters,
-            generationTime: result.generationTime,
-            thumbnailUrl: result.thumbnailUrl,
-            settings: settings,
-          },
-        })
-        .select()
-        .single();
-      
-      if (genError) {
-        console.error('❌ Error saving to generation table:', genError);
-      } else {
-        console.log('✅ Saved to generation table with id:', genData?.id, 'projectId:', genData?.projectId);
-      }
-
-      generation = genData;
-
-      // 패널 업데이트 (있는 경우)
-      if (panelId) {
-        await supabase
-          .from('panel')
-          .update({
-            imageUrl: result.imageUrl,
-            updatedAt: new Date().toISOString(),
-          })
-          .eq('id', panelId);
-      }
-
-      // 프로젝트가 지정된 경우 프로젝트 최종 편집 시간 업데이트
-      if (projectId) {
-        await supabase
-          .from('project')
-          .update({
-            lasteditedat: new Date().toISOString(),
-          })
-          .eq('id', projectId);
-      }
-    }
-
+    // 단순한 응답 데이터
     const responseData = {
       success: true,
       imageUrl: result.imageUrl,
       thumbnailUrl: result.thumbnailUrl,
       tokensUsed: result.tokensUsed,
-      generationId: generation.id, // 중요: generationId를 반환하여 참조로 사용
+      generationId: generation.id,
       remainingTokens: tokenResult.remainingTokens,
-      dailyRemaining: tokenResult.dailyRemaining,
-      detectedCharacters: result.detectedCharacters,
-      usage: {
-        imageCount,
-        estimatedCost: imageCount * 52, // 원가 52원/이미지
-        platformPrice: imageCount * 130, // 판매가 130원/이미지 (2.5배 마진)
-        generationTimeMs: result.generationTime,
-      }
+      dailyRemaining: tokenResult.dailyRemaining
     };
     
-    console.log('📤 Sending response:', responseData);
+    console.log('📤 응답 전송:', responseData.imageUrl);
     return NextResponse.json(responseData);
 
   } catch (error) {

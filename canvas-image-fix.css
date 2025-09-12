@@ -1,0 +1,16 @@
+/* Canvas image scaling fix - 캔버스에 이미지가 꽉 차도록 수정 */
+
+/* 기존 object-cover를 object-fill로 변경하여 이미지가 캔버스를 완전히 채우도록 함 */
+.canvas-background-image {
+  object-fit: fill !important;
+  object-position: center !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* 미리보기 이미지도 동일하게 처리 */
+.preview-image {
+  object-fit: fill !important;
+  width: 100% !important;
+  height: 100% !important;
+}

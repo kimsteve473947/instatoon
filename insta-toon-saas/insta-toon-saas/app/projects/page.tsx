@@ -40,8 +40,6 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from 'next/navigation';
-import { AddCharacterModal } from '@/components/studio/AddCharacterModal';
-import { ActionMenu } from '@/components/ui/action-menu';
 
 interface Project {
   id: string;
@@ -92,7 +90,6 @@ export default function ProjectsPage() {
   const [showEmptyProjects, setShowEmptyProjects] = useState(false); // 빈 프로젝트 표시 여부
   const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null);
   const [showStorageDropdown, setShowStorageDropdown] = useState(false);
-  const [showAddCharacterModal, setShowAddCharacterModal] = useState(false);
   const storageDropdownRef = useRef<HTMLDivElement>(null);
   
   const supabase = createBrowserClient(
@@ -259,11 +256,9 @@ export default function ProjectsPage() {
     router.push('/studio');
   };
 
-  const handleMoveToTrash = async (projectId: string, e?: React.MouseEvent) => {
-    if (e) {
-      e.preventDefault(); // Link 클릭 방지
-      e.stopPropagation();
-    }
+  const handleMoveToTrash = async (projectId: string, e: React.MouseEvent) => {
+    e.preventDefault(); // Link 클릭 방지
+    e.stopPropagation();
     
     try {
       // Supabase에서 프로젝트를 휴지통으로 이동 (soft delete)
@@ -281,25 +276,6 @@ export default function ProjectsPage() {
       console.log('Project moved to trash:', projectId);
     } catch (error) {
       console.error('Error moving project to trash:', error);
-    }
-  };
-
-  const handleMoveCharacterToTrash = async (characterId: string) => {
-    try {
-      // 캐릭터를 휴지통으로 이동 (API 또는 Supabase 직접 업데이트)
-      const { error } = await supabase
-        .from('character')
-        .update({ deletedAt: new Date().toISOString() })
-        .eq('id', characterId);
-
-      if (error) throw error;
-
-      // UI에서 즉시 제거
-      setCharacters(prev => prev.filter(c => c.id !== characterId));
-      
-      console.log('Character moved to trash:', characterId);
-    } catch (error) {
-      console.error('Error moving character to trash:', error);
     }
   };
 
@@ -734,19 +710,6 @@ export default function ProjectsPage() {
                           {new Date(character.createdAt).toLocaleDateString()}
                         </p>
                       </div>
-
-                      {/* 액션 메뉴 */}
-                      <ActionMenu
-                        className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
-                        items={[]}
-                        deleteAction={{
-                          onConfirm: () => handleMoveCharacterToTrash(character.id),
-                          title: "캐릭터를 쓰레기통으로 이동하시겠습니까?",
-                          description: "이 캐릭터가 쓰레기통으로 이동됩니다. 쓰레기통에서 복원하거나 완전히 삭제할 수 있습니다.",
-                          confirmText: "쓰레기통으로 이동"
-                        }}
-                        buttonClassName="h-6 w-6"
-                      />
                     </div>
                   ))}
                   
@@ -976,10 +939,7 @@ export default function ProjectsPage() {
                 내 캐릭터
                 <span className="ml-2 text-sm font-normal text-gray-500">({filteredCharacters.length}개)</span>
               </h2>
-              <Button 
-                className="bg-purple-600 hover:bg-purple-700"
-                onClick={() => setShowAddCharacterModal(true)}
-              >
+              <Button className="bg-purple-600 hover:bg-purple-700">
                 <Plus className="h-4 w-4 mr-2" />
                 캐릭터 추가
               </Button>
@@ -1007,18 +967,11 @@ export default function ProjectsPage() {
                     </p>
                   </div>
 
-                  {/* 액션 메뉴 */}
-                  <ActionMenu
-                    className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
-                    items={[]}
-                    deleteAction={{
-                      onConfirm: () => handleMoveCharacterToTrash(character.id),
-                      title: "캐릭터를 쓰레기통으로 이동하시겠습니까?",
-                      description: "이 캐릭터가 쓰레기통으로 이동됩니다. 쓰레기통에서 복원하거나 완전히 삭제할 수 있습니다.",
-                      confirmText: "쓰레기통으로 이동"
-                    }}
-                    buttonClassName="h-6 w-6"
-                  />
+                  <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0 bg-white/90 backdrop-blur">
+                      <MoreVertical className="h-3 w-3" />
+                    </Button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -1104,17 +1057,6 @@ export default function ProjectsPage() {
           </div>
         )}
       </div>
-
-      {/* AddCharacterModal */}
-      <AddCharacterModal
-        open={showAddCharacterModal}
-        onOpenChange={setShowAddCharacterModal}
-        onCharacterAdded={() => {
-          // 캐릭터 추가 후 데이터 다시 로드
-          loadDashboardData();
-        }}
-        canvasRatio="4:5" // 기본 비율
-      />
     </div>
   );
 }
